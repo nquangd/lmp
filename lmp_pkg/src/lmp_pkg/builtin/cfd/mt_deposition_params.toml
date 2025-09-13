@@ -1,0 +1,33 @@
+# CFD mouth-throat deposition parameters for production
+# These parameters are used when ML_CFD model is not available
+
+[default]
+name = "default_mt_deposition"
+description = "Default mouth-throat deposition parameters"
+
+# Simple size-based MT deposition estimation
+[size_based_mt_deposition]
+small_particle_threshold_um = 2.0
+large_particle_threshold_um = 4.0
+small_particle_mt_fraction = 0.30
+medium_particle_mt_slope = 0.10  # Linear scaling between small/large
+large_particle_mt_fraction = 0.70
+
+# Device-specific adjustments
+[device_adjustments]
+DFP = 1.0  # Dry powder inhaler baseline
+pMDI = 0.85  # Pressurized MDI typically has lower MT deposition
+
+# Propellant-specific adjustments  
+[propellant_adjustments]
+PT010 = 0.95  # HFA propellant adjustment
+PT210 = 1.05  # Alternative HFA formulation
+
+# Population-specific scaling factors
+[population_scaling]
+Healthy = 1.26  # ET_Scale factor for healthy population
+COPD_Opt_1 = 1.35
+COPD_Opt_2 = 1.40
+COPD_Opt_3 = 1.45
+COPD_Opt_4 = 1.50
+COPD_Opt_5 = 1.55

@@ -1,0 +1,18 @@
+# FEV1 Disease Progression Parameters
+# Based on Eq. 4 from the paper and Table S2 parameters
+
+name = "fev1_disease_progression_copd"
+description = "Disease progression parameters for COPD FEV1 decline"
+
+# Typical disease progression rate
+progression_slope_L_per_year = -0.032    # Typical progression rate [L/year]
+weeks_per_year = 52.14                   # Weeks per year for conversion
+
+# Baseline normalization
+baseline_normalization_L = 1.2           # Baseline for progression scaling
+
+# Inter-study variability for disease progression  
+[variability]
+log_isv_cv_disease_progression = -0.611  # Log of ISV CV for disease progression slope
+# Derived: isv_dp_cv = exp(-0.611) ≈ 0.544
+# Variance: log(isv_dp_cv^2 + 1) ≈ 0.268

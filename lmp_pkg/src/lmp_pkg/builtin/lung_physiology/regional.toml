@@ -1,0 +1,69 @@
+# Regional lung physiology parameters
+# Based on original lmp_apps/population/attributes.py RegionPhysiology class
+# PBPK model parameters (regional, not generational)
+# Regions: ET (Extrathoracic), BB (Bronchiolar), bb (Bronchiolar), Al (Alveolar)
+
+name = "regional"
+description = "Regional lung physiology parameters for PBPK modeling"
+
+# Region names
+regions = ["ET", "BB", "bb", "Al"]
+
+# Epithelial lining fluid area reference values (cm²)
+[A_elf_ref]
+ET = 50.2
+BB = 305.51
+bb_b = 2772.4
+Al = 1.43e6
+
+# Extra area reference values (cm²)
+[extra_area_ref]
+ET = 0.0
+BB = 0.0
+bb_b = 0.0
+Al = 1330900.0
+
+# Epithelial lining fluid thickness (cm)
+[d_elf]
+ET = 0.027
+BB = 0.0011
+bb_b = 6.0e-4
+Al = 7.0e-6
+
+# Epithelial thickness (cm)  
+[d_epi]
+ET = 0.06
+BB = 0.0055812
+bb_b = 0.0015
+Al = 3.6e-5
+
+# Tissue volume (mL)
+[V_tissue]
+ET = 1.004
+BB = 20.9
+bb_b = 7.6
+Al = 432.6
+
+# Tissue blood flow (mL/min)
+[Q_g]
+ET = 2.4
+BB = 0.302333333
+bb_b = 0.1685
+Al = 86.65333333
+
+# Transit time (minutes)
+[tg]
+ET = 864.0
+BB = 6855.0
+bb_b = 62580.0
+Al = 6.0e51
+
+# Volume fraction
+V_frac_g = 0.2
+
+# Number of epithelial layers
+[n_epi_layer]
+ET = 1
+BB = 1
+bb_b = 1
+Al = 1

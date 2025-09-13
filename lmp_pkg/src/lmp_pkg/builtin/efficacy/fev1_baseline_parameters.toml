@@ -1,0 +1,25 @@
+# FEV1 Baseline Model Parameters
+# Based on Table S2 from supplementary material (Augmented data 1996-2021)
+
+name = "fev1_baseline_copd"
+description = "Baseline FEV1 parameters for COPD patients"
+
+# Typical baseline and variability
+typical_baseline_L = 1.17          # Typical baseline FEV1 [L]
+inter_study_variance = 0.0099      # Inter-study variance (bl_isv)
+inter_arm_variance = 0.0004        # Inter-arm variance (bl_iav)
+
+# Covariate effects on baseline (Eq. 3)
+[covariate_effects]
+disease_baseline = -0.163          # Disease severity effect
+exacerbation_baseline = -0.0397    # Exacerbation history effect  
+age_baseline = -0.0091             # Age effect
+
+# Reference values for centering covariates
+[reference_values]
+disease_reference = 2              # Reference disease severity
+exacerbation_reference = 0         # Reference exacerbation count
+age_reference = 63.6               # Reference age [years]
+
+# Arm size normalization parameters
+arm_size_reference = 200           # Reference arm size for scaling

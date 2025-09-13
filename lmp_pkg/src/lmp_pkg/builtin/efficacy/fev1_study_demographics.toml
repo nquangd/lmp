@@ -1,0 +1,29 @@
+# FEV1 Study Demographics and Population Parameters
+# Based on PT009001 study demographics and typical COPD populations
+
+name = "fev1_study_demographics_pt009001"
+description = "Study demographics for PT009001-like COPD trials"
+
+# Age distribution (PT009001 demographics)
+[age_distribution]
+mean_years = 61.8                  # Mean age [years]
+std_years = 8.5                    # Standard deviation [years]
+distribution_type = "normal"       # Distribution type
+
+# Disease severity distribution
+[disease_severity]
+categories = [1, 2, 3, 4]          # Disease severity levels
+probabilities = [0.25, 0.25, 0.25, 0.25]  # Equal probability (can be customized)
+description = "COPD disease severity categories"
+
+# Exacerbation history distribution  
+[exacerbation_history]
+categories = [0, 1, 2, 3, 4]       # Number of prior exacerbations
+probabilities = [0.2, 0.2, 0.2, 0.2, 0.2]  # Equal probability (can be customized)
+description = "Prior exacerbation count distribution"
+
+# Alternative demographics (commented for reference)
+# [age_distribution_alternative] 
+# mean_years = 65.0                # Alternative age mean
+# std_years = 7.5                  # Alternative age std
+# description = "Alternative age distribution"

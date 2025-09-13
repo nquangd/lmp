@@ -1,0 +1,102 @@
+# BD (Budesonide) API parameters
+# Based on original lmp_apps/api/api.py _defaults["BD"]
+
+name = "BD" 
+description = "Budesonide - Anti-inflammatory corticosteroid"
+
+# Basic properties
+molecular_weight = 430.54  # μg/μmol (= g/mol)
+blood_plasma_ratio = 0.855    # BP
+cell_binding = 0              # cell_bind
+
+# PK model configuration  
+n_pk_compartments = 3
+volume_central_L = 29.92      # V_central_L
+clearance_L_h = 94.79         # CL_h - restored to original value
+k12_h = 6.656
+k21_h = 2.203  
+k13_h = 1.623
+k31_h = 0.3901
+
+# GI absorption
+hepatic_extraction_pct = 87.0  # Eh
+
+peff_GI = 3.5e-4
+
+# Physical properties
+diffusion_coeff = 4.87e-6     # D
+density_g_m3 = 1.2e6         # density
+solubility_pg_ml = 2.58e7    # solub = 25.8 * 1e6 (pg/mL)
+
+# Fraction unbound by compartment
+[fraction_unbound]
+ELF = 1.0
+Epithelium = 0.0433
+Tissue = 0.0433  
+Plasma = 0.12
+
+# Permeability scaling by region
+[peff]
+In = 2.1e-7
+Out = 2.1e-7
+peff_para = 2.1e-7
+
+# Regional permeability scaling factors
+[pscale]
+    [pscale.ET]
+    In = 125.0
+    Out = 125.0
+    [pscale.BB]  
+    In = 20.0
+    Out = 20.0
+    [pscale.bb]
+    In = 10.0
+    Out = 10.0
+    [pscale.Al]
+    In = 1.0
+    Out = 1.0
+
+# Paracellular scaling by region
+[pscale_para]
+ET = 0.0
+BB = 0.0
+bb = 0.0
+Al = 0.0
+
+# Kinetic rate constants (per hour, converted from per second)
+[k_in]
+Epithelium = 0.25  # Original: 0.25/3600 per second
+Tissue = 0.25
+
+[k_out]  
+Epithelium = 0.4   # Original: 0.4/3600 per second
+Tissue = 0.4
+
+# Regional kinetic scaling factors
+[pscale_Kin]
+    [pscale_Kin.ET]
+    Epithelium = 1.0
+    Tissue = 1.0
+    [pscale_Kin.BB]
+    Epithelium = 1.0 
+    Tissue = 1.0
+    [pscale_Kin.bb]
+    Epithelium = 1.0
+    Tissue = 1.0
+    [pscale_Kin.Al]
+    Epithelium = 1.0
+    Tissue = 1.0
+
+[pscale_Kout]
+    [pscale_Kout.ET]
+    Epithelium = 1.0
+    Tissue = 1.0
+    [pscale_Kout.BB]
+    Epithelium = 1.0
+    Tissue = 1.0  
+    [pscale_Kout.bb]
+    Epithelium = 1.0
+    Tissue = 1.0
+    [pscale_Kout.Al]
+    Epithelium = 1.0
+    Tissue = 1.0

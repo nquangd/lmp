@@ -1,0 +1,16 @@
+# FEV1 Residual Error Parameters
+# From Table S2 - additive residual error variance
+
+name = "fev1_residual_error"
+description = "Residual error parameters for FEV1 measurements"
+
+# Additive residual error variance
+residual_variance = 0.042          # Variance of additive residual error [L^2]
+
+# Study arm parameters
+default_arm_size = 204             # Default study arm size
+reference_arm_size = 200           # Reference arm size for scaling
+
+# Error model type
+error_model = "additive"           # Additive error model
+error_distribution = "normal"      # Normal distribution for residual errors

@@ -1,0 +1,14 @@
+# FEV1 Placebo Effect Parameters
+# Based on Eq. 5 from the paper - gradual onset model
+
+name = "fev1_placebo_effects_copd"
+description = "Placebo effect parameters with gradual onset"
+
+# Placebo effect parameters (from Table S2, Data 1996-2013 column)
+placebo_emax_L = 0.0359            # Maximum placebo effect [L]
+placebo_et50_weeks = 20            # Time to 50% effect [weeks]
+# Note: log(PT50) = 3.0, so PT50 ≈ 20 weeks
+
+# Inter-study variability for placebo effect
+[variability]  
+isv_variance_placebo_emax = 0.0021 # ISV variance for placebo Emax

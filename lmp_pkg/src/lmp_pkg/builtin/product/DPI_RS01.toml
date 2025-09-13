@@ -1,0 +1,22 @@
+# Dry Powder Inhaler Product
+name = "DPI_RS01"
+device_type = "DPI"
+formulation_type = "dry_powder"
+
+# Dose and concentration
+label_claim_mg = 0.2
+
+# Particle characteristics
+mass_median_diameter_um = 3.2
+geometric_standard_deviation = 1.8
+
+# Device performance
+emitted_dose_percent = 92.0
+fine_particle_fraction = 0.55
+
+# Excipients
+excipients = ["lactose_monohydrate", "magnesium_stearate"]
+
+# Metadata
+description = "Reservoir dry powder inhaler"
+manufacturer = "DPI_Systems_Inc"

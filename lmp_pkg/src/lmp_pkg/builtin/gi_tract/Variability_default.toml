@@ -1,0 +1,119 @@
+# GI Tract physiological variability parameters
+# Based on actual variability data from builtin/variability/default.toml
+# Structure: [inter_sigma, inter_dist, intra_sigma, intra_dist, dependent_field]
+# Note: No specific GI variability data available, using default values (sigma=0)
+
+name = []
+description = []
+
+# Number of GI compartments - No variability data available
+num_comp = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# GI Area parameters (cm²) by API type - No variability data available
+# All compartments set to sigma=0 (no variability)
+[gi_area]
+BD = [
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"]
+]
+GP = [
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"]
+]
+FF = [
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"]
+]
+
+# GI Transit time parameters (minutes) by API type - No variability data available
+[gi_tg]
+BD = [
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"]
+]
+GP = [
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"]
+]
+FF = [
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"]
+]
+
+# GI Volume parameters (mL) by API type - No variability data available
+[gi_vol]
+BD = [
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"], 
+    [0.0, "lognormal", 0.0, "lognormal", "BD"]
+]
+GP = [
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"], 
+    [0.0, "lognormal", 0.0, "lognormal", "GP"]
+]
+FF = [
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"], 
+    [0.0, "lognormal", 0.0, "lognormal", "FF"]
+]
