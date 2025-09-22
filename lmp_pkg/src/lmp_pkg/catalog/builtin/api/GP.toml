@@ -1,0 +1,101 @@
+# GP (Glycopyrronium) API parameters  
+# Based on original lmp_apps/api/api.py _defaults["GP"]
+
+name = "GP"
+description = "Glycopyrronium - Long-acting muscarinic antagonist (LAMA)"
+
+# Basic properties
+molecular_weight = 318.43  # μg/μmol (= g/mol)
+blood_plasma_ratio = 0.664
+cell_binding = 0 # 1
+
+# PK model configuration
+n_pk_compartments = 3
+volume_central_L = 5.6
+clearance_L_h = 35.64
+k12_h = 7.38
+k21_h = 1.6
+k13_h = 2.41
+k31_h = 0.054
+
+# GI absorption  
+hepatic_extraction_pct = 96.5
+peff_GI = 1.535e-4
+
+# Physical properties
+diffusion_coeff = 6.97e-6
+density_g_m3 = 1.2e6
+solubility_pg_ml = 127e9 # 1.27e9  1270 * 1e6 (reference value)
+
+# Fraction unbound by compartment
+[fraction_unbound]
+ELF = 1.0
+Epithelium = 0.217
+Tissue = 0.217
+Plasma = 0.516
+
+# Permeability scaling by region
+[peff]
+In = 2.35e-7
+Out = 2.0e-10
+peff_para = 1.2e-7
+
+# Regional permeability scaling factors  
+[pscale]
+    [pscale.ET]
+    In = 10.0
+    Out = 10.0
+    [pscale.BB]
+    In = 1.0
+    Out = 1.0
+    [pscale.bb]
+    In = 1.0
+    Out = 1.0
+    [pscale.Al]
+    In = 1.0
+    Out = 1.0
+
+# Paracellular scaling by region
+[pscale_para]
+ET = 3.5
+BB = 1.0
+bb = 1.0
+Al = 0.05
+
+# Kinetic rate constants (per hour)
+[k_in]
+Epithelium = 0.0
+Tissue = 7.0  # 7/3600 per second in original
+
+[k_out]
+Epithelium = 0.0
+Tissue = 0.48  # 0.48/3600 per second in original
+
+# Regional kinetic scaling factors
+[pscale_Kin]
+    [pscale_Kin.ET]
+    Epithelium = 1.0
+    Tissue = 1.0
+    [pscale_Kin.BB]
+    Epithelium = 1.0
+    Tissue = 1.0
+    [pscale_Kin.bb]
+    Epithelium = 1.0
+    Tissue = 1.0
+    [pscale_Kin.Al]
+    Epithelium = 1.0
+    Tissue = 1.0
+
+[pscale_Kout]
+    [pscale_Kout.ET]
+    Epithelium = 1.0
+    Tissue = 1.0
+    [pscale_Kout.BB]
+    Epithelium = 1.0
+    Tissue = 1.0
+    [pscale_Kout.bb]
+    Epithelium = 1.0
+    Tissue = 1.0
+    [pscale_Kout.Al]
+    Epithelium = 1.0
+    Tissue = 1.0

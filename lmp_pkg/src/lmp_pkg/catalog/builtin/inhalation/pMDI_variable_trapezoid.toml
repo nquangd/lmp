@@ -1,0 +1,32 @@
+# pMDI Variable Trapezoid Flow Profile
+# Based on original lmp_apps/population/attributes.py InhalationManeuver class
+# Variable trapezoid shape with rise time, hold time, and fall time
+# Used for pMDI devices with coordinated actuation
+
+name = "pMDI_variable_trapezoid"
+description = "Variable trapezoid flow profile for pMDI devices"
+maneuver_type = "variable_trapezoid"
+
+# Peak inspiratory flow rate (L/min)
+pifr_Lpm = 30.0
+
+# Rise time to peak flow (s)
+rise_time_s = 0.4
+
+# Inhaled volume (L)
+inhaled_volume_L = 2.0
+
+# Hold time at peak flow (s)
+hold_time_s = 0.5
+
+# Breath hold time after inhalation (s)
+breath_hold_time_s = 30.0
+
+# Exhalation flow rate (L/min)
+exhalation_flow_Lpm = 30.0
+
+# Bolus volume (mL)
+bolus_volume_ml = 200.0
+
+# Bolus delay (s)
+bolus_delay_s = 0.0

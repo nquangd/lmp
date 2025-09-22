@@ -1,0 +1,16 @@
+{
+  "name": "BD_e",
+  "ref": "BD",
+  "overrides": {
+    "pscale": {
+      "ET": {
+        "In": 0,
+        "Out": 0
+      }
+    }
+  },
+  "id": "bd-e",
+  "category": "api",
+  "updated": "2025-09-22T10:32:59.840198",
+  "created": "2025-09-22T10:32:59.840198"
+}

@@ -1,0 +1,428 @@
+# Reference lung geometry derived from healthy.csv
+name = "healthy"
+description = "Reference generation-level geometry and physiology"
+
+[[generations]]
+generation = -1
+region = "ET"
+multiplicity = 1
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 15.98 # so area equal to 50.2
+diameter_cm = 2.0
+gravity_angle_deg = 0.0
+branching_angle_deg = 0.0
+expansion_fraction = 0.00000000
+d_elf_cm = 0.027
+d_epi_cm = 0.06
+q_g_ml_min = 144 #2.4
+v_tissue_ml = 1.004
+transit_time_s = 864.0
+
+[[generations]]
+generation = 0
+region = "BB"
+multiplicity = 1
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 10.26
+diameter_cm = 1.539
+gravity_angle_deg = 0.0
+branching_angle_deg = 0.0
+expansion_fraction = 0.04160000
+d_elf_cm = 0.0011
+d_epi_cm = 0.006
+q_g_ml_min = 2.94
+v_tissue_ml = 3.4
+transit_time_s = 1119.0
+
+[[generations]]
+generation = 1
+region = "BB"
+multiplicity = 2
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 4.07
+diameter_cm = 1.043
+gravity_angle_deg = 20.0
+branching_angle_deg = 33.0
+expansion_fraction = 0.04170000
+d_elf_cm = 0.0011
+d_epi_cm = 0.0055
+q_g_ml_min = 1.58
+v_tissue_ml = 1.8
+transit_time_s = 595.62
+
+[[generations]]
+generation = 2
+region = "BB"
+multiplicity = 4
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 1.624
+diameter_cm = 0.71
+gravity_angle_deg = 31.0
+branching_angle_deg = 34.0
+expansion_fraction = 0.04170000
+d_elf_cm = 0.0011
+d_epi_cm = 0.0055
+q_g_ml_min = 0.86
+v_tissue_ml = 1.0
+transit_time_s = 324.78
+
+[[generations]]
+generation = 3
+region = "BB"
+multiplicity = 8
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 0.65
+diameter_cm = 0.479
+gravity_angle_deg = 43.0
+branching_angle_deg = 22.0
+expansion_fraction = 0.04160000
+d_elf_cm = 0.0011
+d_epi_cm = 0.0055
+q_g_ml_min = 0.46
+v_tissue_ml = 0.5
+transit_time_s = 177.3
+
+[[generations]]
+generation = 4
+region = "BB"
+multiplicity = 16
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 1.086
+diameter_cm = 0.385
+gravity_angle_deg = 39.0
+branching_angle_deg = 20.0
+expansion_fraction = 0.04170000
+d_elf_cm = 0.0011
+d_epi_cm = 0.0055
+q_g_ml_min = 1.25
+v_tissue_ml = 1.4
+transit_time_s = 465.42
+
+[[generations]]
+generation = 5
+region = "BB"
+multiplicity = 32
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 0.915
+diameter_cm = 0.299
+gravity_angle_deg = 39.0
+branching_angle_deg = 18.0
+expansion_fraction = 0.04170000
+d_elf_cm = 0.0011
+d_epi_cm = 0.0055
+q_g_ml_min = 1.63
+v_tissue_ml = 1.9
+transit_time_s = 624.0
+
+[[generations]]
+generation = 6
+region = "BB"
+multiplicity = 64
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 0.769
+diameter_cm = 0.239
+gravity_angle_deg = 40.0
+branching_angle_deg = 19.0
+expansion_fraction = 0.04160000
+d_elf_cm = 0.0011
+d_epi_cm = 0.0055
+q_g_ml_min = 2.19
+v_tissue_ml = 2.5
+transit_time_s = 838.8
+
+[[generations]]
+generation = 7
+region = "BB"
+multiplicity = 128
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 0.65
+diameter_cm = 0.197
+gravity_angle_deg = 36.0
+branching_angle_deg = 22.0
+expansion_fraction = 0.04170000
+d_elf_cm = 0.0011
+d_epi_cm = 0.0055
+q_g_ml_min = 3.06
+v_tissue_ml = 3.6
+transit_time_s = 1147.2
+
+[[generations]]
+generation = 8
+region = "BB"
+multiplicity = 256
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 0.547
+diameter_cm = 0.159
+gravity_angle_deg = 39.0
+branching_angle_deg = 28.0
+expansion_fraction = 0.04170000
+d_elf_cm = 0.0011
+d_epi_cm = 0.0055
+q_g_ml_min = 4.17
+v_tissue_ml = 4.8
+transit_time_s = 1563.0
+
+[[generations]]
+generation = 9
+region = "bb"
+multiplicity = 512
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 0.462
+diameter_cm = 0.132
+gravity_angle_deg = 45.0
+branching_angle_deg = 22.0
+expansion_fraction = 0.04160000
+d_elf_cm = 0.0006
+d_epi_cm = 0.0015
+q_g_ml_min = 0.24
+v_tissue_ml = 0.3
+transit_time_s = 2132.4
+
+[[generations]]
+generation = 10
+region = "bb"
+multiplicity = 1024
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 0.393
+diameter_cm = 0.111
+gravity_angle_deg = 43.0
+branching_angle_deg = 33.0
+expansion_fraction = 0.04170000
+d_elf_cm = 0.0006
+d_epi_cm = 0.0015
+q_g_ml_min = 0.35
+v_tissue_ml = 0.4
+transit_time_s = 3186.6
+
+[[generations]]
+generation = 11
+region = "bb"
+multiplicity = 2048
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 0.333
+diameter_cm = 0.093
+gravity_angle_deg = 45.0
+branching_angle_deg = 34.0
+expansion_fraction = 0.04170000
+d_elf_cm = 0.0006
+d_epi_cm = 0.0015
+q_g_ml_min = 0.53
+v_tissue_ml = 0.5
+transit_time_s = 4540.8
+
+[[generations]]
+generation = 12
+region = "bb"
+multiplicity = 4096
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 0.282
+diameter_cm = 0.081
+gravity_angle_deg = 45.0
+branching_angle_deg = 37.0
+expansion_fraction = 0.04160000
+d_elf_cm = 0.0006
+d_epi_cm = 0.0015
+q_g_ml_min = 0.86
+v_tissue_ml = 0.8
+transit_time_s = 6768.0
+
+[[generations]]
+generation = 13
+region = "bb"
+multiplicity = 8192
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 0.231
+diameter_cm = 0.07
+gravity_angle_deg = 60.0
+branching_angle_deg = 39.0
+expansion_fraction = 0.04170000
+d_elf_cm = 0.0006
+d_epi_cm = 0.0015
+q_g_ml_min = 1.4
+v_tissue_ml = 1.1
+transit_time_s = 9240.0
+
+[[generations]]
+generation = 14
+region = "bb"
+multiplicity = 16384
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 0.197
+diameter_cm = 0.063
+gravity_angle_deg = 60.0
+branching_angle_deg = 39.0
+expansion_fraction = 0.04170000
+d_elf_cm = 0.0006
+d_epi_cm = 0.0015
+q_g_ml_min = 2.41
+v_tissue_ml = 1.8
+transit_time_s = 14412.0
+
+[[generations]]
+generation = 15
+region = "bb"
+multiplicity = 32768
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 0.171
+diameter_cm = 0.056
+gravity_angle_deg = 60.0
+branching_angle_deg = 51.0
+expansion_fraction = 0.04160000
+d_elf_cm = 0.0006
+d_epi_cm = 0.0015
+q_g_ml_min = 4.32
+v_tissue_ml = 2.7
+transit_time_s = 22302.0
+
+[[generations]]
+generation = 16
+region = "Al"
+multiplicity = 65536
+alveoli_volume_ml = 0.0
+extra_surface_area_cm2 = 0.0
+length_cm = 0.141
+diameter_cm = 0.051
+gravity_angle_deg = 60.0
+branching_angle_deg = 45.0
+expansion_fraction = 0.04170000
+d_elf_cm = 7e-06
+d_epi_cm = 3.6e-05
+q_g_ml_min = 5.38
+v_tissue_ml = 0.4
+transit_time_s = 42300.0
+
+[[generations]]
+generation = 17
+region = "Al"
+multiplicity = 131072
+alveoli_volume_ml = 3.7
+extra_surface_area_cm2 = 2662.0
+length_cm = 0.121
+diameter_cm = 0.046
+gravity_angle_deg = 60.0
+branching_angle_deg = 45.0
+expansion_fraction = 0.04170000
+d_elf_cm = 7e-06
+d_epi_cm = 3.6e-05
+q_g_ml_min = 18.01
+v_tissue_ml = 1.5
+transit_time_s = 1e+50
+
+[[generations]]
+generation = 18
+region = "Al"
+multiplicity = 262144
+alveoli_volume_ml = 13.22
+extra_surface_area_cm2 = 9316.0
+length_cm = 0.1
+diameter_cm = 0.043
+gravity_angle_deg = 60.0
+branching_angle_deg = 45.0
+expansion_fraction = 0.04160000
+d_elf_cm = 7e-06
+d_epi_cm = 3.6e-05
+q_g_ml_min = 46.75
+v_tissue_ml = 3.9
+transit_time_s = 1e+50
+
+[[generations]]
+generation = 19
+region = "Al"
+multiplicity = 524288
+alveoli_volume_ml = 41.56
+extra_surface_area_cm2 = 26617.0
+length_cm = 0.085
+diameter_cm = 0.04
+gravity_angle_deg = 60.0
+branching_angle_deg = 45.0
+expansion_fraction = 0.04170000
+d_elf_cm = 7e-06
+d_epi_cm = 3.6e-05
+q_g_ml_min = 117.15
+v_tissue_ml = 9.8
+transit_time_s = 1e+50
+
+[[generations]]
+generation = 20
+region = "Al"
+multiplicity = 1048576
+alveoli_volume_ml = 140.35
+extra_surface_area_cm2 = 93160.0
+length_cm = 0.071
+diameter_cm = 0.038
+gravity_angle_deg = 60.0
+branching_angle_deg = 45.0
+expansion_fraction = 0.04170000
+d_elf_cm = 7e-06
+d_epi_cm = 3.6e-05
+q_g_ml_min = 371.08
+v_tissue_ml = 31.0
+transit_time_s = 1e+50
+
+[[generations]]
+generation = 21
+region = "Al"
+multiplicity = 2097152
+alveoli_volume_ml = 276.81
+extra_surface_area_cm2 = 184988.0
+length_cm = 0.06
+diameter_cm = 0.037
+gravity_angle_deg = 60.0
+branching_angle_deg = 45.0
+expansion_fraction = 0.04160000
+d_elf_cm = 7e-06
+d_epi_cm = 3.6e-05
+q_g_ml_min = 725.87
+v_tissue_ml = 60.0
+transit_time_s = 1e+50
+
+[[generations]]
+generation = 22
+region = "Al"
+multiplicity = 4194304
+alveoli_volume_ml = 567.35
+extra_surface_area_cm2 = 375300.0
+length_cm = 0.05
+diameter_cm = 0.035
+gravity_angle_deg = 60.0
+branching_angle_deg = 45.0
+expansion_fraction = 0.04170000
+d_elf_cm = 7e-06
+d_epi_cm = 3.6e-05
+q_g_ml_min = 1448.0
+v_tissue_ml = 120.0
+transit_time_s = 1e+50
+
+[[generations]]
+generation = 23
+region = "Al"
+multiplicity = 8388608
+alveoli_volume_ml = 958.8
+extra_surface_area_cm2 = 638808.0
+length_cm = 0.043
+diameter_cm = 0.035
+gravity_angle_deg = 60.0
+branching_angle_deg = 45.0
+expansion_fraction = 0.04170000
+d_elf_cm = 7e-06
+d_epi_cm = 3.6e-05
+q_g_ml_min = 2467.0
+v_tissue_ml = 206.0
+transit_time_s = 1e+50

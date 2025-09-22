@@ -1,0 +1,23 @@
+# Healthy reference subject for production deposition modeling
+# Based on production physiology parameters
+name = "healthy_reference"
+subject_id = "healthy_reference"
+age_years = 35.6
+weight_kg = 97.8
+height_cm = 183.8
+sex = "M"
+population = "Healthy"
+
+# Respiratory parameters (production values)
+frc_ml = 3300.0  # Mean FRC for healthy population
+frc_ref_ml = 2999.6  # Reference FRC for scaling
+tidal_volume_ml = 500.0
+respiratory_rate_bpm = 15.0
+
+# Deposition scaling factors
+et_scale_factor = 1.26  # MT deposition scaling
+mt_size = "medium"  # Mouth-throat size category
+
+# Variability settings for production
+enable_variability = false
+description = "Healthy reference subject for production deposition calculations"

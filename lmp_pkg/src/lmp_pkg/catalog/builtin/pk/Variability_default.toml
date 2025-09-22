@@ -1,0 +1,47 @@
+# Pharmacokinetic variability parameters by API
+# Based on actual variability data from builtin/variability/default.toml
+# Structure: [inter_sigma, inter_dist, intra_sigma, intra_dist, dependent_field]
+# GCV values have been converted to sigma using: sigma = sqrt(ln(gcv^2 + 1))
+
+name = []
+description = []
+
+# Clearance (L/h) variability by API type
+# From default.toml: BD=0.26, GP=0.5, FF=0.3 (inter GCV); BD=0.05, GP=0.4, FF=0.1 (intra GCV)
+# Converted to sigma values
+[clearance_L_h]
+BD = [0.2558, "lognormal", 0.0500, "lognormal", "BD"]
+GP = [0.4724, "lognormal", 0.3853, "lognormal", "GP"]
+FF = [0.2936, "lognormal", 0.0998, "lognormal", "FF"]
+
+# Hepatic extraction ratio variability by API type
+# From default.toml: BD=0.114, GP=0.5, FF=0.4 (inter GCV); BD=0.10, GP=0.4, FF=0.2 (intra GCV)
+# Converted to sigma values
+[hepatic_extraction]
+BD = [0.1136, "lognormal", 0.0998, "lognormal", "BD"]
+GP = [0.4724, "lognormal", 0.3853, "lognormal", "GP"]
+FF = [0.3853, "lognormal", 0.1980, "lognormal", "FF"]
+
+# Volume of distribution central compartment (L) - No variability (excluded from PK variability)
+[volume_central_L]
+BD = [0.0, "lognormal", 0.0, "lognormal", "BD"]
+GP = [0.0, "lognormal", 0.0, "lognormal", "GP"]
+FF = [0.0, "lognormal", 0.0, "lognormal", "FF"]
+
+# Inter-compartmental clearance (L/h) - No variability (excluded from PK variability)
+[q_inter_L_h]
+BD = [0.0, "lognormal", 0.0, "lognormal", "BD"]
+GP = [0.0, "lognormal", 0.0, "lognormal", "GP"]
+FF = [0.0, "lognormal", 0.0, "lognormal", "FF"]
+
+# Absorption rate constant (1/h) - No variability (excluded from PK variability)
+[ka_h]
+BD = [0.0, "lognormal", 0.0, "lognormal", "BD"]
+GP = [0.0, "lognormal", 0.0, "lognormal", "GP"]
+FF = [0.0, "lognormal", 0.0, "lognormal", "FF"]
+
+# Bioavailability fraction - No variability (excluded from PK variability)
+[f_bioavail]
+BD = [0.0, "lognormal", 0.0, "lognormal", "BD"]
+GP = [0.0, "lognormal", 0.0, "lognormal", "GP"]
+FF = [0.0, "lognormal", 0.0, "lognormal", "FF"]

@@ -1,0 +1,34 @@
+# Deposition-only configuration example
+# Useful for analyzing regional deposition patterns
+
+[run]
+stages = ["deposition"]
+seed = 42
+threads = 1
+artifact_dir = "deposition_results"
+
+[population_variability]
+demographic = false
+lung_regional = false
+lung_generation = false
+gi = false
+pk = false
+inhalation = false
+
+[deposition]
+model = "clean_lung"
+particle_grid = "fine"
+
+# Deposition-specific parameters
+[deposition.params]
+# breathing_pattern = 1.0  # Removed for now
+device_efficiency = 0.85
+
+[subject]
+ref = "adult_70kg"
+
+[product]
+ref = "HFA_MDI_PT210"
+
+[maneuver]
+ref = "standard_MDI_inhale_hold"

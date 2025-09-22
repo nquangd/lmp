@@ -1,0 +1,129 @@
+
+
+PySide6 as GUI Choice
+
+Why PySide6 (primary)
+	•	Robust long jobs: Run simulations in separate processes (via multiprocessing or QProcess) to dodge the GIL and keep the UI responsive. Clean cancellation (kill process), deterministic logs, and OS-level job isolation.
+	•	Snappy plotting & big tables: Use pyqtgraph for time-series PK curves and heatmaps; QAbstractTableModel over pandas for large results. Lower latency than a browser plot stack.
+	•	Native UX: Real modal/“open dialog” forms, file choosers, and project workspaces. Easy drag-drop for configs, checkpoint folders, etc.
+	•	No server to babysit: Run entirely local; optional hooks to submit to SLURM/cluster.
+
+
+
+PySide6 Architecture
+
+1) Process Model (critical for 30-min jobs)
+	•	Launcher → Worker process(es) pattern:
+	•	GUI process owns state, queue, and persistence.
+	•	Each simulation run = 1 worker process (not a thread) launched with a small entry module (e.g., python -m lmp_pkg.gui_worker run --run-id ...) calling your app_api.run_simulation with a frozen config.
+	•	IPC via QProcess stdout/stderr (stream logs) or multiprocessing + multiprocessing.connection pipes. Keep it simple at first: QProcess, write progress as JSON lines.
+	•	Progress + cancel:
+	•	Define a minimal progress protocol (JSONL): {"event":"progress","pct":37.5}, {"event":"metric","name":"AUC","value":...}, {"event":"checkpoint","path":"..."}
+	•	GUI “Cancel” button calls QProcess.terminate() then kill() after grace.
+
+2) Project/Run Storage (deterministic & resumable)
+	•	Workspace directory (selectable):
+workspace/
+	•	configs/ (YAML/JSON from GUI forms)
+	•	runs/<run_id>/
+	•	config.json (exact config used)
+	•	manifest.parquet (for sweeps)
+	•	logs/*.log (structlog JSON recommended)
+	•	results/*.parquet (tidy tables from convert_results_to_dataframes)
+	•	artifacts/ (plots, pickles, checkpoints)
+	•	Make every run reproducible: store hash of config + package version, seed, and environment.
+
+3) UI Layout (modules → runs → results)
+
+MainWindow (Tabbed)
+	1.	Home / Workspace
+	•	Choose/create workspace folder
+	•	Recent projects
+	•	Package/version display (from lmp_pkg.__version__)
+	2.	Catalog & Libraries
+	•	Lists from app_api.list_catalog_entries("subject"/"api"/"product")
+	•	Preview entity JSON, copy to config
+	3.	Study Designer
+	•	Subject(s): choose catalog ref or custom; inter-/intra-subject variability (forms bound to your variability/spec.py)
+	•	Products & APIs: table editor (like your earlier screenshot requirement).
+	•	Quick-add rows, dropdowns for known device, propellant, api, and free numeric fields.
+	•	Models: select deposition, lung_pbbm, systemic_pk variants (null or real) + their parameters.
+	•	Axes / Sweeps: small grid where the user picks param paths (e.g., "pbbm.params.CL") and lists of values. Under the hood, use app_api.plan_simulation_manifest.
+	•	Validation: call validate_config, show inline errors.
+	•	Save Config: materialize config.json to configs/.
+	4.	Run Queue
+	•	Load config.json, preview manifest table (pandas → Qt model).
+	•	“Start Run” → spawns worker process(es).
+	•	Per-run row shows: status, elapsed, ETA (optional), progress bar, Cancel, Open logs, Open folder.
+	5.	Results Viewer
+	•	Left: runs list & filters
+	•	Right: tabs:
+	•	PK Curves (pyqtgraph): overlay per-API, per-subject; mouse hover tooltips.
+	•	Deposition: regional bars/heatmap if provided.
+	•	Tables: show DataFrames produced by convert_results_to_dataframes.
+	•	Compare Runs: pick 2–N runs → overlay curves, delta metrics (Cmax, AUC, tmax).
+	6.	Logs & Diagnostics
+	•	Live log console (tail worker stdout/stderr and JSON logs). Filter by level.
+	•	Export logs as file.
+
+Widgets & Tech
+	•	Forms: pydantic-backed schemas → dynamic editor widgets (Qt) so adding model params remains low-code.
+	•	Tables: QAbstractTableModel with a pandas view (fast sorting/filter).
+	•	Plots: pyqtgraph (fast), fallback to matplotlib export for publication-ready figures.
+
+4) Orchestration & Concurrency
+	•	Default: 1 process per CPU-heavy run, optionally capped by a “Max parallel” spinner.
+	•	For large sweeps: chunk manifest into batches; keep a small fixed pool of processes.
+	•	Optional: SLURM submission mode:
+	•	GUI writes a job bundle (config + manifest split) and a generated SLURM script.
+	•	Submit via sbatch. A simple watcher (polling job IDs) updates status.
+	•	Results sync back to runs/<run_id>/ when complete.
+
+5) Logging & Telemetry
+	•	Use your existing structlog; configure a JSON renderer for workers.
+	•	Emit progress as JSONL to stdout for GUI consumption; also duplicate to a file in the run folder.
+	•	Add a minimal metrics hook in engine/pipeline.py to emit stage boundaries, timings, and failure reasons.
+
+6) Result Serialization
+	•	Keep everything columnar: Parquet for tables (pyarrow), NPZ for arrays if needed.
+	•	convert_results_to_dataframes(result) becomes the canonical producer for UI tables; extend it to include:
+	•	pk_curve (t, conc, api, subject, product)
+	•	regional_deposition
+	•	compartment_timecourse for PBBM (long format)
+	•	Precompute common KPIs (AUC, Cmax, tmax) on save; store to summary.parquet.
+
+7) Packaging
+	•	Ship a single-file desktop app using PyInstaller or briefcase (Windows/macOS/Linux).
+	•	Runtime requirements: Python 3.11+, PySide6, pyqtgraph, pandas, pyarrow, structlog.
+
+⸻
+
+Concrete Dev Plan (10 focused steps)
+	1.	Stub worker CLI
+python -m lmp_pkg.gui_worker run --run-id <id> --config <path>
+	•	Loads config via app_api.load_config
+	•	Calls app_api.run_simulation
+	•	Writes progress JSONL to stdout and results to runs/<id>/
+	2.	Progress protocol
+Add a tiny helper that wraps pipeline stages to emit: started/finished events, percent updates (manifest index / total), and key KPIs.
+	3.	Workspace manager
+	•	Create a simple class handling folder structure, IDs, and file naming.
+	4.	Qt Shell
+	•	MainWindow with tabs + a shared state object (current workspace, run list).
+	•	Implement “Start Run” with QProcess and live log/JSON parsing.
+	5.	Catalog & Designer forms
+	•	Build entity pickers using app_api.list_catalog_entries.
+	•	Add a small ParamPathPicker for sweep axes (with validation).
+	6.	Manifest preview
+	•	Call plan_simulation_manifest() and display table.
+	•	Save manifest.parquet to run folder at launch.
+	7.	Results ingestion
+	•	After run finishes, call convert_results_to_dataframes (or load saved Parquets) and populate the viewer.
+	8.	Plotting
+	•	Implement PK overlay view (pyqtgraph), tooltips, and export (PNG/SVG).
+	9.	Cancellation & error UX
+	•	Graceful stop; mark run as canceled/failed; keep partial logs.
+	10.	SLURM integration (optional)
+
+	•	A dialog that generates sbatch script, submits, and monitors via squeue polling.
+

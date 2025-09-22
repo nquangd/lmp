@@ -1,0 +1,27 @@
+# GI Tract physiology parameters
+# Based on original lmp_apps/population/attributes.py GITract class
+# Used for PBBM gastrointestinal absorption modeling
+
+name = "default"
+description = "Default GI tract physiological parameters for PBBM modeling"
+
+# Number of GI compartments
+num_comp = 9
+
+# GI Area parameters (cm²) by API type
+[gi_area]
+BD = [0.0, 0.0, 0.0, 0.0, 300.0, 300.0, 144.72, 280.02, 41.77]
+GP = [0.0, 80.0, 400.0, 422.82, 126.07, 226.32, 144.72, 28.02, 41.77]
+FF = [0.0, 0.0, 0.0, 0.0, 250.0, 150.0, 150.0, 28.02, 41.77]
+
+# GI Transit time parameters (seconds) by API type
+[gi_tg]
+BD = [60.0, 600.0, 600.0, 600.0, 3000.0, 3600.0, 1044.0, 15084.0, 45252.0]
+GP = [12600.0, 5400.0, 3348.0, 2664.0, 2088.0, 1512.0, 1044.0, 15084.0, 45252.0]
+FF = [600.0, 600.0, 600.0, 600.0, 2088.0, 1512.0, 1044.0, 15084.0, 45252.0]
+
+# GI Volume parameters (mL) by API type
+[gi_vol]
+BD = [46.56, 41.56, 154.2, 122.3, 94.29, 70.53, 49.8, 47.49, 50.33]
+GP = [46.56, 41.56, 154.2, 122.3, 94.29, 70.53, 49.8, 47.49, 50.33]
+FF = [46.56, 41.56, 154.2, 122.3, 94.29, 70.53, 49.8, 47.49, 50.33]

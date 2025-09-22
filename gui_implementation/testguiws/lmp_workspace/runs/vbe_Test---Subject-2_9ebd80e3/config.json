@@ -1,0 +1,71 @@
+{
+  "run": {
+    "stages": [
+      "deposition",
+      "pbbm",
+      "pk"
+    ],
+    "workflow_name": null,
+    "seed": 123,
+    "threads": 1,
+    "enable_numba": false,
+    "artifact_dir": "results",
+    "n_replicates": 1
+  },
+  "study": {
+    "study_type": "bioequivalence",
+    "design": "parallel",
+    "n_subjects": 6,
+    "population": null,
+    "charcoal_block": false
+  },
+  "deposition": {
+    "model": "clean_lung",
+    "particle_grid": "medium",
+    "params": {}
+  },
+  "pbbm": {
+    "model": "numba",
+    "epi_layers": [
+      2,
+      2,
+      1,
+      1
+    ],
+    "solver": {
+      "method": "BDF",
+      "rtol": 1e-06,
+      "atol": 1e-09,
+      "max_step": 1.0
+    },
+    "params": {},
+    "charcoal_block": false,
+    "suppress_et_absorption": false
+  },
+  "pk": {
+    "model": "pk_3c",
+    "params": {}
+  },
+  "analysis": {
+    "bioequivalence": true,
+    "custom_metrics": []
+  },
+  "subject": {
+    "ref": "healthy_reference",
+    "overrides": {}
+  },
+  "api": {
+    "ref": "BD",
+    "overrides": {}
+  },
+  "product": {
+    "ref": "reference_product",
+    "overrides": {}
+  },
+  "maneuver": {
+    "ref": "pMDI_variable_trapezoid",
+    "overrides": {}
+  },
+  "variability": null,
+  "population_variability": null
+}

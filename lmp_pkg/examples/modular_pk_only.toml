@@ -1,0 +1,80 @@
+# PK-Only Modular PBBM Example
+# This configuration demonstrates IV or systemic dosing scenarios
+# where lung deposition is bypassed entirely
+
+[run]
+stages = ["pbbm", "pk"]  # Skip deposition stage
+seed = 789
+threads = 1
+enable_numba = true
+artifact_dir = "pk_only_results"
+
+[population_variability]
+demographic = false
+lung_regional = false
+lung_generation = false
+gi = false
+pk = false
+inhalation = false
+
+[deposition]
+model = "null"  # No deposition for IV scenario
+
+[pbbm]
+# Use PK-only chained model
+model = "chained_pk_only"
+initial_dose_strategy = "iv_bolus"  # IV dosing instead of lung deposition
+
+[pbbm.solver]
+method = "BDF"
+rtol = 1e-6
+atol = 1e-9
+max_step = 7200.0  # 2-hour max step for PK dynamics
+
+# Initial IV dosing parameters
+[pbbm.dosing]
+route = "iv_bolus"
+dose_amount_ug = 500.0  # 500 μg IV dose
+dose_time_s = 0.0  # Bolus at t=0
+infusion_duration_s = 0.0  # Instant bolus
+
+# Systemic PK parameters
+[pbbm.pk]
+clearance_L_per_h = 25.0
+volume_central_L = 45.0
+volume_peripheral1_L = 80.0
+volume_peripheral2_L = 150.0
+distribution_half_life_h = 3.0
+fu_plasma = 0.85
+
+[pk]
+model = "null"  # PK handled by chained PBBM
+
+[analysis]
+bioequivalence = false  # Not applicable for IV
+custom_metrics = [
+    "plasma_concentration_profile",
+    "distribution_kinetics", 
+    "elimination_kinetics",
+    "compartmental_amounts"
+]
+
+# Focus on systemic exposure
+[analysis.output]
+include_plasma_binding = true
+include_distribution_kinetics = true
+time_resolution_minutes = 5  # Less frequent sampling for IV
+
+# Entity references
+[subject]
+ref = "adult_70kg"
+
+[api]
+ref = "salbutamol"
+
+# No product or maneuver needed for IV dosing
+[product]
+ref = "IV_solution"
+
+[maneuver]
+ref = "IV_administration"

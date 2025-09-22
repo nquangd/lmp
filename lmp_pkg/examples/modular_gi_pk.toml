@@ -1,0 +1,112 @@
+# GI + PK Modular PBBM Example  
+# This configuration demonstrates oral dosing scenarios
+# bypassing lung deposition and focusing on GI absorption
+
+[run]
+stages = ["pbbm", "pk"]  # Skip deposition stage
+seed = 321
+threads = 2
+enable_numba = true
+artifact_dir = "gi_pk_results"
+
+[population_variability]
+demographic = false
+lung_regional = false
+lung_generation = false
+gi = false
+pk = false
+inhalation = false
+
+[deposition]
+model = "null"  # No lung deposition for oral scenario
+
+[pbbm]
+# Use GI + PK chained model
+model = "chained_gi_pk"
+initial_dose_strategy = "oral"  # Oral dosing
+
+[pbbm.solver]
+method = "BDF"
+rtol = 1e-6
+atol = 1e-9
+max_step = 3600.0  # 1-hour max step for GI absorption
+
+# Initial oral dosing parameters
+[pbbm.dosing]
+route = "oral_immediate"
+dose_amount_mg = 10.0  # 10 mg oral dose
+dose_time_s = 0.0  # Dose at t=0
+tablet_dissolution_rate_per_h = 2.0  # Immediate release
+
+# GI-specific parameters
+[pbbm.gi]
+n_compartments = 9
+peff_gi_cm_per_s = 5e-5  # Lower GI permeability for oral
+hepatic_extraction_fraction = 0.3  # Significant first-pass effect
+fu_gi = 0.8  # Some protein binding in GI
+blood_to_plasma_ratio = 1.2
+
+# Detailed GI transit parameters
+[pbbm.gi.volumes_ml]
+stomach = 250.0
+duodenum = 50.0
+jejunum_1 = 200.0
+jejunum_2 = 200.0
+ileum_1 = 300.0
+ileum_2 = 300.0
+cecum = 400.0
+colon_1 = 500.0
+colon_2 = 600.0
+
+[pbbm.gi.surface_areas_cm2]
+stomach = 800.0
+duodenum = 300.0
+jejunum_1 = 1800.0
+jejunum_2 = 1800.0
+ileum_1 = 1200.0
+ileum_2 = 1200.0
+cecum = 600.0
+colon_1 = 400.0
+colon_2 = 300.0
+
+# Systemic PK parameters optimized for oral absorption
+[pbbm.pk]
+clearance_L_per_h = 30.0
+volume_central_L = 40.0
+volume_peripheral1_L = 60.0
+volume_peripheral2_L = 120.0
+distribution_half_life_h = 4.0
+fu_plasma = 0.7  # More binding expected
+
+[pk]
+model = "null"  # PK handled by chained PBBM
+
+[analysis]
+bioequivalence = true  # Relevant for oral formulations
+custom_metrics = [
+    "oral_bioavailability",
+    "gi_absorption_profile", 
+    "first_pass_metabolism",
+    "plasma_concentration_time",
+    "absorption_kinetics"
+]
+
+# Focus on GI and systemic processes
+[analysis.output]
+include_gi_compartment_profiles = true
+include_hepatic_metabolism = true
+include_absorption_flux = true
+time_resolution_minutes = 10  # Oral absorption is slower
+
+# Entity references
+[subject]
+ref = "adult_70kg"
+
+[api]
+ref = "salbutamol"  # Same API, different route
+
+[product]
+ref = "oral_tablet"
+
+[maneuver]
+ref = "oral_administration"

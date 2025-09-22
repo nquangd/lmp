@@ -1,0 +1,42 @@
+# FEV1 Drug Effect Parameters  
+# Emax model parameters for triple therapy combination
+
+name = "fev1_drug_effects_triple"
+description = "Drug effect parameters for BD/FF/GP triple therapy"
+
+# Standard reference doses [µg]
+[reference_doses]
+budesonide_ug = 320                # BD reference dose
+formoterol_ug = 9.6                # FF reference dose  
+glycopyrronium_ug = 14.4           # GP reference dose
+
+# Emax model parameters for individual APIs
+[budesonide]
+emax_mL = 63.2                     # Maximum effect [mL]
+e50_ug = 169.8                     # Half-maximal dose [µg]
+dose_adjustment_factor = 1.0       # Dosing adjustment factor
+
+[formoterol]  
+emax_mL = 82.3                     # Maximum effect [mL]
+e50_ug = 1.5                       # Half-maximal dose [µg]
+dose_adjustment_factor = 1.0       # Dosing adjustment factor
+
+[glycopyrronium]
+emax_mL = 144.3                    # Maximum effect [mL]  
+e50_ug = 10.1                      # Half-maximal dose [µg]
+dose_adjustment_factor = 2.0       # Dosing adjustment factor (dref = dose * 2)
+
+# Drug interaction parameters
+[interactions]
+laba_laac_interaction = 1.35       # LABA+LAAC interaction parameter (labalaacint)
+
+# Baseline interaction effects (Eq. 9)
+[baseline_interactions]
+baseline_threshold_L = 1.20        # Baseline FEV1 threshold [L]
+anti_inflammatory_slope = 0.638    # theta_ai_bl - AI baseline interaction
+bronchodilator_slope = 0.268       # theta_bd_bl - BD baseline interaction
+
+# Inter-study variability (ISV) for drug effects
+[variability]
+anti_inflammatory_cv = 0.405       # CV for anti-inflammatory effect
+bronchodilator_cv = 0.185          # CV for bronchodilator effect

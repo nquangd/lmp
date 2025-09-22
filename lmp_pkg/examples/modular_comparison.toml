@@ -1,0 +1,123 @@
+# Modular PBBM Model Comparison Example
+# This configuration demonstrates the flexible modular architecture
+# by comparing different model combinations for the same API
+
+[run]
+stages = ["deposition", "pbbm", "pk"]
+seed = 100
+threads = 8  # Parallel processing for multiple scenarios
+enable_numba = true
+artifact_dir = "modular_comparison_results"
+
+[population_variability]
+demographic = false
+lung_regional = false
+lung_generation = false
+gi = false
+pk = false
+inhalation = false
+
+# Base deposition (same for all scenarios)
+[deposition]
+model = "clean_lung"
+particle_grid = "medium"
+
+# Primary PBBM configuration (full model for reference)
+[pbbm]
+model = "chained_full"  # Reference: full lung + GI + PK
+epi_layers = [2, 2, 1, 1]
+
+[pbbm.solver]
+method = "BDF"
+rtol = 1e-6
+atol = 1e-9
+max_step = 3600.0
+
+# Standard parameters for comparison
+[pbbm.lung]
+dissolution_cutoff_radius_cm = 1e-6
+lumping_rate_per_s = 5e-4
+
+[pbbm.gi]
+n_compartments = 9
+peff_gi_cm_per_s = 1e-4
+hepatic_extraction_fraction = 0.15
+
+[pbbm.pk]
+clearance_L_per_h = 35.0
+volume_central_L = 50.0
+volume_peripheral1_L = 100.0
+volume_peripheral2_L = 200.0
+
+[pk]
+model = "null"
+
+# Define comparison scenarios
+[comparison]
+enabled = true
+scenarios = [
+    "full_model",      # lung + gi + pk  
+    "lung_pk_only",    # lung + pk (no gi)
+    "gi_pk_only",      # gi + pk (oral equiv dose)
+    "pk_only",         # pk only (iv equiv dose)
+    "modular_lung"     # lung only (no systemic)
+]
+
+# Scenario-specific overrides
+[comparison.lung_pk_only]
+pbbm.model = "chained_lung_pk"
+description = "Lung absorption with systemic PK, no GI transit"
+
+[comparison.gi_pk_only]
+pbbm.model = "chained_gi_pk"  
+pbbm.dosing.route = "oral"
+pbbm.dosing.dose_amount_mg = 2.0  # Equivalent oral dose
+description = "Oral dosing equivalent, GI absorption + PK"
+
+[comparison.pk_only]
+pbbm.model = "chained_pk_only"
+pbbm.dosing.route = "iv_bolus"
+pbbm.dosing.dose_amount_ug = 200.0  # Equivalent IV dose
+description = "IV dosing equivalent, systemic PK only"
+
+[comparison.modular_lung]
+pbbm.model = "modular"  # Lung-only model
+description = "Lung absorption only, no systemic distribution"
+
+[analysis]
+bioequivalence = true
+comparison_analysis = true  # Enable cross-scenario comparison
+custom_metrics = [
+    "bioavailability_comparison",
+    "absorption_route_contributions", 
+    "model_complexity_assessment",
+    "computational_efficiency"
+]
+
+# Comprehensive output for all scenarios
+[analysis.output]
+include_all_binding_states = true
+include_flux_data = true
+include_model_diagnostics = true
+generate_comparison_plots = true
+time_resolution_minutes = 2
+
+# Generate specific comparison metrics
+[analysis.comparison_metrics]
+cmax_ratios = true           # Compare peak concentrations
+auc_ratios = true           # Compare total exposures  
+absorption_fractions = true  # Compare absorption routes
+model_performance = true     # Solver efficiency comparison
+
+# Standard entity references
+[subject]
+ref = "adult_70kg"
+
+[api]
+ref = "salbutamol"
+
+[product]
+ref = "HFA_MDI_PT210"
+
+[maneuver]
+ref = "standard_MDI_inhale_hold"

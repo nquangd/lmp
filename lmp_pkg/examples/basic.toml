@@ -1,0 +1,50 @@
+# Basic LMP configuration example
+# This configuration runs all three pipeline stages with null models
+
+[run]
+stages = ["deposition", "pbbm", "pk"]
+seed = 123
+threads = 1
+enable_numba = false
+artifact_dir = "results"
+
+[population_variability]
+demographic = false
+lung_regional = false
+lung_generation = false
+gi = false
+pk = false
+inhalation = false
+
+[deposition]
+model = "clean_lung"
+particle_grid = "medium"
+
+[pbbm]
+model = "null"
+epi_layers = [2, 2, 1, 1]
+
+[pbbm.solver]
+method = "BDF"
+rtol = 1e-6
+atol = 1e-9
+max_step = 1.0
+
+[pk]
+model = "null"
+
+[analysis]
+bioequivalence = true
+
+# Entity references - resolved from catalog
+[subject]
+ref = "adult_70kg"
+
+[api]
+ref = "salbutamol"
+
+[product]
+ref = "HFA_MDI_PT210"
+
+[maneuver]
+ref = "standard_MDI_inhale_hold"

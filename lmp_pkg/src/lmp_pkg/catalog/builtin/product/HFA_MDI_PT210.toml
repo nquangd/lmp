@@ -1,0 +1,24 @@
+# HFA MDI Product - Pressurized metered dose inhaler  
+name = "HFA_MDI_PT210"
+device_type = "pMDI"
+formulation_type = "solution"
+
+# Dose and concentration
+label_claim_mg = 0.1
+concentration_mg_ml = 1.25
+
+# Particle characteristics
+mass_median_diameter_um = 1.8
+geometric_standard_deviation = 2.1
+
+# Device performance
+emitted_dose_percent = 85.0
+fine_particle_fraction = 0.45
+
+# Propellant/excipients
+propellant_type = "HFA-134a"
+excipients = ["ethanol", "oleic_acid"]
+
+# Metadata
+description = "HFA-propelled pressurized MDI"
+manufacturer = "Generic_Pharma"

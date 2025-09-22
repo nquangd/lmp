@@ -1,0 +1,66 @@
+# Modular PBBM Example: Lung + PK (no GI)
+# This configuration demonstrates lung absorption followed by systemic PK
+# Suitable for inhaled drug studies without significant GI contribution
+
+[run]
+stages = ["deposition", "pbbm", "pk"]
+seed = 123
+threads = 2
+enable_numba = true
+artifact_dir = "lung_pk_results"
+
+[population_variability]
+demographic = false
+lung_regional = false
+lung_generation = false
+gi = false
+pk = false
+inhalation = false
+
+[deposition]
+model = "clean_lung"
+particle_grid = "medium"
+
+[pbbm]
+# Use chained model with lung + PK components only
+model = "chained_lung_pk"
+epi_layers = [2, 2, 1, 1]  # ET, BB, bb, Al epithelium layers
+
+[pbbm.solver]
+method = "BDF"
+rtol = 1e-6
+atol = 1e-9
+max_step = 3600.0  # 1-hour max step for lung kinetics
+
+# Lung-specific parameters
+[pbbm.lung]
+dissolution_cutoff_radius_cm = 1e-6  # 1 μm cutoff for particle lumping
+lumping_rate_per_s = 5e-4  # Small particle lumping rate
+
+# Systemic PK parameters
+[pbbm.pk]
+clearance_L_per_h = 35.0
+volume_central_L = 50.0
+volume_peripheral1_L = 100.0
+volume_peripheral2_L = 200.0
+distribution_half_life_h = 2.0
+
+[pk]
+model = "null"  # PK handled by chained PBBM
+
+[analysis]
+bioequivalence = true
+custom_metrics = ["lung_retention", "systemic_exposure", "regional_concentration"]
+
+# Entity references - resolved from catalog
+[subject]
+ref = "adult_70kg"
+
+[api]
+ref = "salbutamol"
+
+[product]
+ref = "HFA_MDI_PT210"
+
+[maneuver]
+ref = "standard_MDI_inhale_hold"

@@ -1,0 +1,43 @@
+# Healthy reference subject variability parameters
+# Based on actual variability data from builtin/variability/default.toml
+# Structure: [inter_sigma, inter_dist, intra_sigma, intra_dist, dependent_field]
+# GCV values have been converted to sigma using: sigma = sqrt(ln(gcv^2 + 1))
+
+name = []
+subject_id = []
+
+# Demographics - No direct variability data available
+age_years = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# Weight in kg - normal distribution with sigma=10.0 (need to convert to relative for multiplicative)
+# Using approximate GCV = sigma/mean = 10/70 = 0.14 -> sigma = 0.1392
+weight_kg = [0.1392, "lognormal", 0.0, "lognormal", ""]
+
+# Height in cm - normal distribution with sigma=8.0 (need to convert to relative)
+# Using approximate GCV = sigma/mean = 8/175 = 0.046 -> sigma = 0.0459
+height_cm = [0.0459, "lognormal", 0.0, "lognormal", ""]
+
+sex = []
+population = []
+
+# FRC in mL - normal distribution with sigma=600.0 (need to convert to relative)
+# Using approximate GCV = sigma/mean = 600/3300 = 0.18 -> sigma = 0.1783
+frc_ml = [0.1783, "lognormal", 0.0, "lognormal", ""]
+
+# Reference FRC - No variability
+frc_ref_ml = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# Respiratory parameters - No variability data available
+tidal_volume_ml = [0.0, "lognormal", 0.0, "lognormal", ""]
+respiratory_rate_bpm = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# ET deposition scaling factor - ET variability from inhalation data
+# inter_gcv = 0.235 -> sigma = 0.2318, intra_gcv = 0.15 -> sigma = 0.1492
+et_scale_factor = [0.2318, "lognormal", 0.1492, "lognormal", ""]
+
+mt_size = []
+
+# Variability settings - No variability for this flag
+enable_variability = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+description = []

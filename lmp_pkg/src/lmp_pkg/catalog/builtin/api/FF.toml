@@ -1,0 +1,101 @@
+# FF (Formoterol Fumarate) API parameters
+# Based on original lmp_apps/api/api.py _defaults["FF"]
+
+name = "FF"
+description = "Formoterol Fumarate - Long-acting beta2-agonist (LABA)"
+
+# Basic properties  
+molecular_weight = 344.4  # μg/μmol (= g/mol)
+blood_plasma_ratio = 0.9
+cell_binding = 0
+
+# PK model configuration
+n_pk_compartments = 3
+volume_central_L = 36.2638
+clearance_L_h = 105.5188
+k12_h = 6.5213
+k21_h = 1.1265
+k13_h = 0.8745
+k31_h = 0.1682
+
+# GI absorption
+hepatic_extraction_pct = 76.0
+peff_GI = 5.0e-4
+
+# Physical properties
+diffusion_coeff = 6.97e-6
+density_g_m3 = 1.2e6
+solubility_pg_ml = 120e9   # set to 120e9b for numerical stability, 1200 * 1e6 (reference value)
+
+# Fraction unbound by compartment
+[fraction_unbound]
+ELF = 1.0
+Epithelium = 0.16
+Tissue = 0.16
+Plasma = 0.38
+
+# Permeability scaling by region
+[peff]
+In = 8.0e-9
+Out = 8.0e-9
+peff_para = 2.0e-8
+
+# Regional permeability scaling factors
+[pscale]
+    [pscale.ET]
+    In = 1750.0
+    Out = 1750.0
+    [pscale.BB]
+    In = 1.0
+    Out = 1.0
+    [pscale.bb]
+    In = 1.0
+    Out = 1.0
+    [pscale.Al]
+    In = 1.0
+    Out = 1.0
+
+# Paracellular scaling by region  
+[pscale_para]
+ET = 0.0
+BB = 0.0
+bb = 0.0
+Al = 0.0
+
+# Kinetic rate constants (per hour)
+[k_in]
+Epithelium = 1495.0  # 1495/3600 per second in original
+Tissue = 1495.0
+
+[k_out]  
+Epithelium = 0.3     # 0.3/3600 per second in original  
+Tissue = 0.3
+
+# Regional kinetic scaling factors
+[pscale_Kin]
+    [pscale_Kin.ET]
+    Epithelium = 0.0
+    Tissue = 0.0
+    [pscale_Kin.BB]
+    Epithelium = 1.0
+    Tissue = 1.0
+    [pscale_Kin.bb]
+    Epithelium = 1.0
+    Tissue = 1.0
+    [pscale_Kin.Al]
+    Epithelium = 1.0
+    Tissue = 1.0
+
+[pscale_Kout]
+    [pscale_Kout.ET]
+    Epithelium = 0.0
+    Tissue = 0.0
+    [pscale_Kout.BB]
+    Epithelium = 1.0
+    Tissue = 1.0
+    [pscale_Kout.bb]
+    Epithelium = 1.0
+    Tissue = 1.0
+    [pscale_Kout.Al]
+    Epithelium = 1.0
+    Tissue = 1.0

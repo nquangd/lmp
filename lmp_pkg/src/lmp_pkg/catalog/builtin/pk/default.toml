@@ -1,0 +1,42 @@
+# Pharmacokinetic parameters by API
+# Based on typical PK values for inhaled drugs
+# These are baseline values before variability is applied
+
+name = "default"
+description = "Default pharmacokinetic parameters for PBBM modeling"
+
+# Clearance (L/h) by API type
+[clearance_L_h]
+BD = 50.0   # Typical clearance for BD
+GP = 30.0   # Typical clearance for GP  
+FF = 40.0   # Typical clearance for FF
+
+# Hepatic extraction ratio by API type
+[hepatic_extraction]
+BD = 0.3   # Typical hepatic extraction for BD
+GP = 0.5   # Typical hepatic extraction for GP
+FF = 0.4   # Typical hepatic extraction for FF
+
+# Volume of distribution central compartment (L) by API type
+[volume_central_L]
+BD = 100.0
+GP = 150.0
+FF = 120.0
+
+# Inter-compartmental clearance (L/h) by API type
+[q_inter_L_h]
+BD = 10.0
+GP = 15.0
+FF = 12.0
+
+# Absorption rate constant (1/h) by API type
+[ka_h]
+BD = 2.0
+GP = 1.5
+FF = 1.8
+
+# Bioavailability fraction by API type
+[f_bioavail]
+BD = 0.15
+GP = 0.20
+FF = 0.18
