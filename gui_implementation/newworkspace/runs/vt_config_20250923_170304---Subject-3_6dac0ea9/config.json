@@ -1,0 +1,240 @@
+{
+  "run": {
+    "stages": [
+      "deposition",
+      "pbbm",
+      "pk"
+    ],
+    "workflow_name": null,
+    "seed": 123,
+    "threads": 1,
+    "enable_numba": false,
+    "artifact_dir": "results",
+    "n_replicates": 1
+  },
+  "study": {
+    "study_type": "bioequivalence",
+    "design": "parallel",
+    "n_subjects": 6,
+    "population": null,
+    "charcoal_block": false
+  },
+  "deposition": {
+    "model": "clean_lung",
+    "particle_grid": "medium",
+    "params": {}
+  },
+  "pbbm": {
+    "model": "numba",
+    "epi_layers": [
+      2,
+      2,
+      1,
+      1
+    ],
+    "solver": {
+      "method": "BDF",
+      "rtol": 1e-06,
+      "atol": 1e-09,
+      "max_step": 1.0
+    },
+    "params": {},
+    "charcoal_block": false,
+    "suppress_et_absorption": false
+  },
+  "pk": {
+    "model": "pk_3c",
+    "params": {}
+  },
+  "analysis": {
+    "bioequivalence": true,
+    "custom_metrics": []
+  },
+  "subject": {
+    "ref": "healthy_reference",
+    "overrides": {
+      "age_years": 35.6,
+      "description": "Healthy reference subject for production deposition calculations",
+      "enable_variability": "False",
+      "et_scale_factor": 1.26,
+      "frc_ml": 3300.0,
+      "frc_ref_ml": 2999.6,
+      "height_cm": 183.8,
+      "mt_size": "medium",
+      "name": "healthy_reference",
+      "population": "Healthy",
+      "respiratory_rate_bpm": 15.0,
+      "sex": "M",
+      "subject_id": "healthy_reference",
+      "tidal_volume_ml": 500.0,
+      "variability": {
+        "age_years": [
+          0.0,
+          "lognormal",
+          0.0,
+          "lognormal",
+          ""
+        ],
+        "enable_variability": [
+          0.0,
+          "lognormal",
+          0.0,
+          "lognormal",
+          ""
+        ],
+        "et_scale_factor": [
+          0.2318,
+          "lognormal",
+          0.1492,
+          "lognormal",
+          ""
+        ],
+        "frc_ml": [
+          0.1783,
+          "lognormal",
+          0.0,
+          "lognormal",
+          ""
+        ],
+        "frc_ref_ml": [
+          0.0,
+          "lognormal",
+          0.0,
+          "lognormal",
+          ""
+        ],
+        "height_cm": [
+          0.0459,
+          "lognormal",
+          0.0,
+          "lognormal",
+          ""
+        ],
+        "respiratory_rate_bpm": [
+          0.0,
+          "lognormal",
+          0.0,
+          "lognormal",
+          ""
+        ],
+        "tidal_volume_ml": [
+          0.0,
+          "lognormal",
+          0.0,
+          "lognormal",
+          ""
+        ],
+        "weight_kg": [
+          0.1392,
+          "lognormal",
+          0.0,
+          "lognormal",
+          ""
+        ]
+      },
+      "weight_kg": 97.8
+    }
+  },
+  "api": {
+    "ref": "BD",
+    "overrides": {}
+  },
+  "product": {
+    "ref": "test_product",
+    "overrides": {
+      "apis": {
+        "BD": {
+          "dose_pg": 330340000.0,
+          "dose_ug": 330.34,
+          "gsd": 1.67,
+          "mmad": 4.06,
+          "ref": "BD_TEST",
+          "usp_depo_fraction": 41.08
+        }
+      }
+    }
+  },
+  "maneuver": {
+    "ref": "pMDI_variable_trapezoid",
+    "overrides": {
+      "bolus_delay_s": 0.0,
+      "bolus_volume_ml": 200.0,
+      "breath_hold_time_s": 30.0,
+      "description": "Variable trapezoid flow profile for pMDI devices",
+      "exhalation_flow_Lpm": 30.0,
+      "hold_time_s": 0.5,
+      "inhaled_volume_L": 2.0,
+      "maneuver_type": "variable_trapezoid",
+      "name": "pMDI_variable_trapezoid",
+      "pifr_Lpm": 30.0,
+      "rise_time_s": 0.4,
+      "variability": {
+        "bolus_delay_s": [
+          0.0,
+          "lognormal",
+          0.0,
+          "lognormal",
+          ""
+        ],
+        "bolus_volume_ml": [
+          0.0,
+          "lognormal",
+          0.0,
+          "lognormal",
+          ""
+        ],
+        "breath_hold_time_s": [
+          0.0,
+          "lognormal",
+          0.0,
+          "lognormal",
+          ""
+        ],
+        "et_scale_factor": [
+          0.2318,
+          "lognormal",
+          0.1492,
+          "lognormal",
+          ""
+        ],
+        "exhalation_flow_Lpm": [
+          0.0,
+          "lognormal",
+          0.0,
+          "lognormal",
+          ""
+        ],
+        "hold_time_s": [
+          0.0,
+          "lognormal",
+          0.0,
+          "lognormal",
+          ""
+        ],
+        "inhaled_volume_L": [
+          0.0,
+          "lognormal",
+          0.0,
+          "lognormal",
+          ""
+        ],
+        "pifr_Lpm": [
+          0.2936,
+          "lognormal",
+          0.2936,
+          "lognormal",
+          ""
+        ],
+        "rise_time_s": [
+          0.0998,
+          "lognormal",
+          0.0998,
+          "lognormal",
+          ""
+        ]
+      }
+    }
+  },
+  "variability": null,
+  "population_variability": null
+}

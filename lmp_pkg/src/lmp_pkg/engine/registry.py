@@ -11,8 +11,9 @@ from ..contracts.stage import Stage
 @dataclass
 class ModelInfo:
     """Information about a registered model."""
+
     name: str
-    family: str  # "deposition", "lung_pbbm", "systemic_pk"
+    family: str  # e.g. "deposition", "lung_pbbm", "systemic_pk", "iv_pk"
     model_class: Type[Stage]
     provides: Set[str]
     requires: Set[str]
@@ -30,7 +31,7 @@ class ModelRegistry:
         """Register a model.
         
         Args:
-            family: Model family ("deposition", "lung_pbbm", "systemic_pk")  
+            family: Model family ("deposition", "lung_pbbm", "systemic_pk", etc.)
             name: Model name within family
             model_class: Model class implementing Stage protocol
         """
@@ -162,6 +163,30 @@ class ModelRegistry:
             self.register("systemic_pk", "pk_1c", SystemicPKStage1C)
             self.register("systemic_pk", "pk_2c", SystemicPKStage2C)
             self.register("systemic_pk", "pk_3c", SystemicPKStage3C)
+        except ImportError:
+            pass
+
+        try:
+            from ..models.pbpk.iv_pk_stage import (
+                IVPKStage1C,
+                IVPKStage2C,
+                IVPKStage3C,
+            )
+            self.register("iv_pk", "iv_1c", IVPKStage1C)
+            self.register("iv_pk", "iv_2c", IVPKStage2C)
+            self.register("iv_pk", "iv_3c", IVPKStage3C)
+        except ImportError:
+            pass
+
+        try:
+            from ..models.pbpk.gi_pk_stage import (
+                GIPKStage1C,
+                GIPKStage2C,
+                GIPKStage3C,
+            )
+            self.register("gi_pk", "gi_1c", GIPKStage1C)
+            self.register("gi_pk", "gi_2c", GIPKStage2C)
+            self.register("gi_pk", "gi_3c", GIPKStage3C)
         except ImportError:
             pass
 

@@ -1,0 +1,13 @@
+# Default template for oral dosing simulations
+
+name = "Default Oral Dosing"
+description = "Template for oral dosing"
+route = "po"
+
+[[apis]]
+name = "BD"
+dose_mg = 0.32904
+
+[[apis]]
+name = "FF"
+dose_mg = 0.00962

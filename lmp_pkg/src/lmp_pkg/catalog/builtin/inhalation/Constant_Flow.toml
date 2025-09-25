@@ -1,0 +1,25 @@
+# Constant Flow Profile
+# Flow time is calculated based on pifr and inhaled volume
+# The same variability strucure and logic applied to relevant parameters, similar to pMDI_variable_trapezoid
+
+name = "Constant_Flow"
+description = "Constant Inhalation"
+maneuver_type = "constant"
+
+# Peak inspiratory flow rate (L/min)
+pifr_Lpm = 30.0
+
+# Inhaled volume (L)
+inhaled_volume_L = 2.0
+
+# Breath hold time after inhalation (s)
+breath_hold_time_s = 30.0
+
+# Exhalation flow rate (L/min)
+exhalation_flow_Lpm = 30.0
+
+# Bolus volume (mL)
+bolus_volume_ml = 200.0
+
+# Bolus delay (s)
+bolus_delay_s = 0.0

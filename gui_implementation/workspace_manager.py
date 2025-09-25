@@ -37,7 +37,14 @@ def _slugify(name: str) -> str:
     return slug or "entry"
 
 
-_CATALOG_CATEGORIES = ("subject", "api", "product", "maneuver")
+_CATALOG_CATEGORIES = (
+    "subject",
+    "api",
+    "product",
+    "maneuver",
+    "lung_geometry",
+    "gi_tract",
+)
 
 logger = structlog.get_logger()
 
@@ -327,12 +334,22 @@ class WorkspaceManager:
                 created = datetime.fromtimestamp(config_file.stat().st_mtime).isoformat()
                 size_bytes = config_file.stat().st_size
 
+                metadata: Dict[str, Any] = {}
+
                 if config_file.suffix.lower() == '.json':
                     with open(config_file, 'r') as f:
                         config_data = json.load(f)
 
                     metadata = config_data.get("metadata", {}) if isinstance(config_data, dict) else {}
                     created = metadata.get("created", created)
+                else:
+                    metadata = {}
+
+                config_name = metadata.get("config_name") if isinstance(metadata, dict) else None
+                if not config_name:
+                    config_name = config_file.name
+                    if isinstance(metadata, dict):
+                        metadata["config_name"] = config_name
 
                 entry = {
                     "name": config_file.name,
@@ -341,8 +358,14 @@ class WorkspaceManager:
                     "size_bytes": size_bytes
                 }
                 run_plan = metadata.get("run_plan") if isinstance(metadata, dict) else None
+                if isinstance(run_plan, dict):
+                    run_plan = dict(run_plan)
+                    run_plan.setdefault("config_name", config_name)
+                    metadata["run_plan"] = run_plan
                 if run_plan is not None:
                     entry["run_plan"] = run_plan
+                if metadata:
+                    entry["metadata"] = metadata
 
                 configs.append(entry)
 

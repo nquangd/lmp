@@ -58,7 +58,7 @@ class Pipeline:
         
         try:
             # Validate requested stages
-            valid_stages = {"cfd", "deposition", "pbbm", "pk"}
+            valid_stages = {"cfd", "deposition", "pbbm", "pk", "iv_pk", "gi_pk"}
             invalid_stages = set(stages) - valid_stages
             if invalid_stages:
                 raise ModelError(f"Invalid stages: {invalid_stages}")
@@ -93,6 +93,18 @@ class Pipeline:
                 results["pk"] = self._run_pk_stage(
                     entities, stage_configs.get("pk", {}),
                     results.get("pbbm"), context
+                )
+
+            # Stage 5: Standalone IV PK (optional, no dependencies)
+            if "iv_pk" in stages:
+                results["iv_pk"] = self._run_iv_pk_stage(
+                    entities, stage_configs.get("iv_pk", {}), context
+                )
+
+            # Stage 6: Standalone GI-driven PK (optional, no dependencies)
+            if "gi_pk" in stages:
+                results["gi_pk"] = self._run_gi_pk_stage(
+                    entities, stage_configs.get("gi_pk", {}), context
                 )
             
             total_runtime = context.end_run()
@@ -247,6 +259,62 @@ class Pipeline:
                 metadata=getattr(result, 'metadata', {})
             )
     
+    def _run_iv_pk_stage(
+        self,
+        entities: Dict[str, Any],
+        config: Dict[str, Any],
+        context: RunContext,
+    ) -> StageResult:
+        with context.time_stage("iv_pk"):
+            model_name = config.get("model", "iv_2c")
+            model = self.registry.get_model("iv_pk", model_name)
+
+            input_data = PKInput(
+                subject=entities["subject"],
+                api=entities["api"],
+                pulmonary_input=None,
+                gi_input=None,
+                params=config.get("params", {}),
+            )
+
+            context.logger.info("Running IV PK", model=model_name)
+            result = model.run(input_data)
+
+            return StageResult(
+                stage_name="iv_pk",
+                model_name=model_name,
+                data=result,
+                metadata=getattr(result, "metadata", {}),
+            )
+
+    def _run_gi_pk_stage(
+        self,
+        entities: Dict[str, Any],
+        config: Dict[str, Any],
+        context: RunContext,
+    ) -> StageResult:
+        with context.time_stage("gi_pk"):
+            model_name = config.get("model", "gi_2c")
+            model = self.registry.get_model("gi_pk", model_name)
+
+            input_data = PKInput(
+                subject=entities["subject"],
+                api=entities["api"],
+                pulmonary_input=None,
+                gi_input=None,
+                params=config.get("params", {}),
+            )
+
+            context.logger.info("Running GI PK", model=model_name)
+            result = model.run(input_data)
+
+            return StageResult(
+                stage_name="gi_pk",
+                model_name=model_name,
+                data=result,
+                metadata=getattr(result, "metadata", {}),
+            )
+
     def validate_stage_sequence(self, stages: List[str]) -> None:
         """Validate that requested stages can be executed.
         
@@ -256,7 +324,7 @@ class Pipeline:
         Raises:
             ModelError: If stage sequence is invalid
         """
-        valid_stages = {"deposition", "pbbm", "pk"}
+        valid_stages = {"deposition", "pbbm", "pk", "iv_pk", "gi_pk"}
         invalid_stages = set(stages) - valid_stages
         if invalid_stages:
             raise ModelError(f"Invalid stages: {invalid_stages}")

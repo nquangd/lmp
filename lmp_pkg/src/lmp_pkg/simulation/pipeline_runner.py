@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, List, Sequence, Optional, Any
+import copy
 
 import numpy as np
 
@@ -82,6 +83,44 @@ def run_pipeline_for_task(
                     copied['params'] = dict(params)
                 stage_overrides_map[stage_name] = copied
 
+        product_route = getattr(product_entity, "route", None) if isinstance(product_entity, Product) else None
+        inferred_route = product_route or (Product.infer_route_from_stages(workflow.stages) if isinstance(product_entity, Product) else None)
+
+        if isinstance(product_entity, Product) and inferred_route:
+            route_stage_list = product_entity.get_route_stage_list(inferred_route)
+            if route_stage_list:
+                stage_configs = {
+                    stage_name: workflow.stage_configs.get(stage_name, {})
+                    for stage_name in route_stage_list
+                }
+                workflow = Workflow(
+                    name=f"{workflow.name}__{inferred_route}",
+                    stages=tuple(route_stage_list),
+                    stage_configs=stage_configs,
+                    population_variability_defaults=workflow.population_variability_defaults,
+                )
+
+            try:
+                default_stage_overrides = product_entity.build_stage_overrides(
+                    inferred_route,
+                    api_name=task.api_name,
+                )
+            except Exception:
+                default_stage_overrides = {}
+            if default_stage_overrides:
+                for stage_name, payload in default_stage_overrides.items():
+                    existing = stage_overrides_map.get(stage_name)
+                    if existing is None:
+                        stage_overrides_map[stage_name] = copy.deepcopy(payload)
+                        continue
+                    if 'model' not in existing and 'model' in payload:
+                        existing['model'] = payload['model']
+                    payload_params = payload.get('params')
+                    if isinstance(payload_params, dict):
+                        existing_params = existing.setdefault('params', {})
+                        for param_key, param_value in payload_params.items():
+                            existing_params.setdefault(param_key, param_value)
+
         if 'pbbm' in workflow.stages:
             pbbm_config = stage_overrides_map.get('pbbm', {'params': {}})
             pbbm_params = dict(pbbm_config.get('params', {}))
@@ -104,6 +143,8 @@ def run_pipeline_for_task(
         deposition_stage = stage_results.get('deposition')
         pbbm_stage = stage_results.get('pbbm')
         pk_stage = stage_results.get('pk')
+        iv_pk_stage = stage_results.get('iv_pk')
+        gi_pk_stage = stage_results.get('gi_pk')
 
         cfd_result = cfd_stage.data if (cfd_stage and isinstance(cfd_stage.data, CFDResult)) else (
             cfd_stage.data if cfd_stage else None
@@ -122,9 +163,17 @@ def run_pipeline_for_task(
             else:
                 pbpk_result = PBBKResult(comprehensive=pbpk_data)
 
-        pk_result = None
+        pk_result: Optional[PKResult] = None
         if pk_stage:
             pk_data = pk_stage.data
+            if isinstance(pk_data, PKResult):
+                pk_result = pk_data
+        if pk_result is None and iv_pk_stage:
+            pk_data = iv_pk_stage.data
+            if isinstance(pk_data, PKResult):
+                pk_result = pk_data
+        if pk_result is None and gi_pk_stage:
+            pk_data = gi_pk_stage.data
             if isinstance(pk_data, PKResult):
                 pk_result = pk_data
 

@@ -1,0 +1,21 @@
+{
+  "run_id": "single_8f395869",
+  "run_type": "single",
+  "label": null,
+  "display_label": null,
+  "parent_run_id": null,
+  "created": "2025-09-22T18:21:38.115389",
+  "status": "failed",
+  "workspace": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/testguiws/lmp_workspace",
+  "run_plan": {
+    "run_type": "single",
+    "run_label": null,
+    "config_name": null
+  },
+  "last_updated": "2025-09-22T18:21:39.785396",
+  "started_at": "2025-09-22T18:21:38.131866",
+  "parameter_overrides": null,
+  "runtime_seconds": 1.65343,
+  "exit_code": 1,
+  "completed_at": "2025-09-22T18:21:39.785235"
+}

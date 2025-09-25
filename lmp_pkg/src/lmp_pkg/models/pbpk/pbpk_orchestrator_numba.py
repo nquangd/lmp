@@ -13,7 +13,7 @@ This class:
 from __future__ import annotations
 
 import numpy as np
-from typing import Dict, List, Any, Tuple, Optional, Union, Callable
+from typing import Dict, List, Any, Tuple, Optional, Union, Callable, Mapping
 from enum import Enum
 from abc import ABC, abstractmethod
 
@@ -301,32 +301,40 @@ class PKComponent(ModelComponent):
         
         # Build PK from API/Subject
         pk = getattr(subject_params, 'pk', None)
+
+        api_vd_central = getattr(api_params, 'volume_central_L', None)
+        api_cl_systemic = getattr(api_params, 'clearance_L_h', None)
+        api_vd_peripheral1 = getattr(api_params, 'volume_peripheral1_L', None)
+        api_vd_peripheral2 = getattr(api_params, 'volume_peripheral2_L', None)
+        api_cl_distribution1 = getattr(api_params, 'cl_distribution1_L_h', None)
+        api_cl_distribution2 = getattr(api_params, 'cl_distribution2_L_h', None)
+        api_k12 = getattr(api_params, 'k12_h', None)
+        api_k21 = getattr(api_params, 'k21_h', None)
+        api_k13 = getattr(api_params, 'k13_h', None)
+        api_k31 = getattr(api_params, 'k31_h', None)
+
         if pk is not None:
-            vd_central = float(getattr(pk, 'volume_central_L', getattr(api_params, 'volume_central_L', 5.0)))
-            cl_systemic = float(getattr(pk, 'clearance_L_h', getattr(api_params, 'clearance_L_h', 35.0)))
-            vd_peripheral1 = float(getattr(pk, 'volume_peripheral1_L', 15.0))
-            vd_peripheral2 = float(getattr(pk, 'volume_peripheral2_L', 50.0))
-            cl_distribution1 = float(getattr(pk, 'cl_distribution1_L_h', 100.0))
-            cl_distribution2 = float(getattr(pk, 'cl_distribution2_L_h', 20.0))
+            vd_central = float(api_vd_central if api_vd_central is not None else getattr(pk, 'volume_central_L', 5.0))
+            cl_systemic = float(api_cl_systemic if api_cl_systemic is not None else getattr(pk, 'clearance_L_h', 35.0))
+            vd_peripheral1 = float(api_vd_peripheral1 if api_vd_peripheral1 is not None else getattr(pk, 'volume_peripheral1_L', 15.0))
+            vd_peripheral2 = float(api_vd_peripheral2 if api_vd_peripheral2 is not None else getattr(pk, 'volume_peripheral2_L', 50.0))
+            cl_distribution1 = float(api_cl_distribution1 if api_cl_distribution1 is not None else getattr(pk, 'cl_distribution1_L_h', 100.0))
+            cl_distribution2 = float(api_cl_distribution2 if api_cl_distribution2 is not None else getattr(pk, 'cl_distribution2_L_h', 20.0))
         else:
-            vd_central = float(getattr(api_params, 'volume_central_L', 5.0))
-            cl_systemic = float(getattr(api_params, 'clearance_L_h', 35.0))
-            k12_h = getattr(api_params, 'k12_h', None)
-            k21_h = getattr(api_params, 'k21_h', None)
-            k13_h = getattr(api_params, 'k13_h', None)
-            k31_h = getattr(api_params, 'k31_h', None)
-            if k12_h and k21_h:
-                cl_distribution1 = float(k12_h * vd_central)
-                vd_peripheral1 = float(cl_distribution1 / k21_h) if k21_h else 15.0
+            vd_central = float(api_vd_central if api_vd_central is not None else 5.0)
+            cl_systemic = float(api_cl_systemic if api_cl_systemic is not None else 35.0)
+            if api_k12 and api_k21:
+                cl_distribution1 = float(api_k12 * vd_central)
+                vd_peripheral1 = float(cl_distribution1 / api_k21) if api_k21 else 15.0
             else:
-                cl_distribution1 = 100.0
-                vd_peripheral1 = 15.0
-            if k13_h and k31_h:
-                cl_distribution2 = float(k13_h * vd_central)
-                vd_peripheral2 = float(cl_distribution2 / k31_h) if k31_h else 50.0
+                cl_distribution1 = float(api_cl_distribution1) if api_cl_distribution1 is not None else 100.0
+                vd_peripheral1 = float(api_vd_peripheral1) if api_vd_peripheral1 is not None else 15.0
+            if api_k13 and api_k31:
+                cl_distribution2 = float(api_k13 * vd_central)
+                vd_peripheral2 = float(cl_distribution2 / api_k31) if api_k31 else 50.0
             else:
-                cl_distribution2 = 20.0
-                vd_peripheral2 = 50.0
+                cl_distribution2 = float(api_cl_distribution2) if api_cl_distribution2 is not None else 20.0
+                vd_peripheral2 = float(api_vd_peripheral2) if api_vd_peripheral2 is not None else 50.0
 
         vd_peripheral = vd_peripheral1
         pk_params = {
@@ -465,11 +473,37 @@ class PBPKOrchestratorNumba:
         else:
             raise ValueError(f"Unknown component type: {comp_type}")
     
-    def get_ode_system(self) -> Callable:
+    def get_ode_system(
+        self,
+        external_input_fn: Optional[Callable[[float], Optional[Mapping[str, float]]]] = None,
+    ) -> Callable:
         """Lean ODE system minimizing Python overhead while leveraging jitclasses."""
         def ode_system(t: float, y: np.ndarray, **kwargs) -> np.ndarray:
             y = np.maximum(y, 0.0)
-            external_inputs = kwargs.get('external_inputs', {})
+            external_inputs: Dict[str, float] = {}
+            if external_input_fn is not None:
+                try:
+                    maybe_inputs = external_input_fn(t) or {}
+                except Exception:
+                    maybe_inputs = {}
+                if isinstance(maybe_inputs, Mapping):
+                    numeric_inputs: Dict[str, float] = {}
+                    for key, value in maybe_inputs.items():
+                        try:
+                            numeric_inputs[key] = float(value)
+                        except (TypeError, ValueError):
+                            continue
+                    external_inputs = numeric_inputs
+            if not external_inputs:
+                extra_inputs = kwargs.get('external_inputs', {})
+                if isinstance(extra_inputs, Mapping):
+                    numeric_inputs: Dict[str, float] = {}
+                    for key, value in extra_inputs.items():
+                        try:
+                            numeric_inputs[key] = float(value)
+                        except (TypeError, ValueError):
+                            continue
+                    external_inputs = numeric_inputs
             derivatives = np.zeros_like(y)
             
             # Determine slices
@@ -568,8 +602,10 @@ class PBPKOrchestratorNumba:
     def solve(self, time_points: np.ndarray, **solver_kwargs) -> Any:
         """Solve with lean ODE using jitclasses; fast and robust."""
         from scipy.integrate import solve_ivp
-        ode_func = self.get_ode_system()
-        y0 = self.get_initial_state(solver_kwargs.pop('initial_conditions', {}))
+        initial_conditions = solver_kwargs.pop('initial_conditions', {})
+        external_input_fn = solver_kwargs.pop('external_input_fn', None)
+        ode_func = self.get_ode_system(external_input_fn)
+        y0 = self.get_initial_state(initial_conditions)
         t_span = (time_points[0], time_points[-1])
         solver_options = {
             'method': 'BDF',

@@ -105,11 +105,12 @@ class RunConfig(BaseModel):
     enable_numba: bool = False
     artifact_dir: str = "results"
     n_replicates: int = Field(default=1, ge=1, description="Number of replicates for variability sampling")
-    
+    stage_overrides: Dict[str, Any] = Field(default_factory=dict, description="Per-stage override payloads")
+
     @field_validator("stages")
     @classmethod
     def validate_stages(cls, v: List[str]) -> List[str]:
-        valid_stages = {"cfd", "deposition", "pbbm", "pk", "analysis"}
+        valid_stages = {"cfd", "deposition", "pbbm", "pk", "iv_pk", "gi_pk", "analysis"}
         invalid = set(v) - valid_stages
         if invalid:
             raise ValueError(f"Invalid stages: {invalid}")

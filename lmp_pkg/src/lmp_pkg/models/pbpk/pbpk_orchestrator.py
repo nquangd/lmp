@@ -409,38 +409,42 @@ class PKComponent(ModelComponent):
         # Select PK parameter source
         use_subject_pk = (self.pk_source == "subject") and hasattr(subject_params, 'pk') and subject_params.pk
 
+        api_vd_central = getattr(api_params, 'volume_central_L', None)
+        api_cl_systemic = getattr(api_params, 'clearance_L_h', None)
+        api_vd_peripheral1 = getattr(api_params, 'volume_peripheral1_L', None)
+        api_vd_peripheral2 = getattr(api_params, 'volume_peripheral2_L', None)
+        api_cl_distribution1 = getattr(api_params, 'cl_distribution1_L_h', None)
+        api_cl_distribution2 = getattr(api_params, 'cl_distribution2_L_h', None)
+        api_k12 = getattr(api_params, 'k12_h', None)
+        api_k21 = getattr(api_params, 'k21_h', None)
+        api_k13 = getattr(api_params, 'k13_h', None)
+        api_k31 = getattr(api_params, 'k31_h', None)
+
         if use_subject_pk:
             pk = subject_params.pk
-            vd_central = float(getattr(pk, 'volume_central_L', 5.0))
-            cl_systemic = float(getattr(pk, 'clearance_L_h', 35.0))
-            vd_peripheral1 = float(getattr(pk, 'volume_peripheral1_L', 15.0))
-            vd_peripheral2 = float(getattr(pk, 'volume_peripheral2_L', 50.0))
-            cl_distribution1 = float(getattr(pk, 'cl_distribution1_L_h', 100.0))
-            cl_distribution2 = float(getattr(pk, 'cl_distribution2_L_h', 20.0))
+            vd_central = float(api_vd_central if api_vd_central is not None else getattr(pk, 'volume_central_L', 5.0))
+            cl_systemic = float(api_cl_systemic if api_cl_systemic is not None else getattr(pk, 'clearance_L_h', 35.0))
+            vd_peripheral1 = float(api_vd_peripheral1 if api_vd_peripheral1 is not None else getattr(pk, 'volume_peripheral1_L', 15.0))
+            vd_peripheral2 = float(api_vd_peripheral2 if api_vd_peripheral2 is not None else getattr(pk, 'volume_peripheral2_L', 50.0))
+            cl_distribution1 = float(api_cl_distribution1 if api_cl_distribution1 is not None else getattr(pk, 'cl_distribution1_L_h', 100.0))
+            cl_distribution2 = float(api_cl_distribution2 if api_cl_distribution2 is not None else getattr(pk, 'cl_distribution2_L_h', 20.0))
         else:
-            # Use API PK exclusively
-            vd_central = float(getattr(api_params, 'volume_central_L', 5.0))
-            cl_systemic = float(getattr(api_params, 'clearance_L_h', 35.0))
+            vd_central = float(api_vd_central if api_vd_central is not None else 5.0)
+            cl_systemic = float(api_cl_systemic if api_cl_systemic is not None else 35.0)
 
-            # Derive distribution clearances and peripheral volumes from API rate constants if present
-            k12_h = getattr(api_params, 'k12_h', None)
-            k21_h = getattr(api_params, 'k21_h', None)
-            k13_h = getattr(api_params, 'k13_h', None)
-            k31_h = getattr(api_params, 'k31_h', None)
-
-            if k12_h and k21_h:
-                cl_distribution1 = float(k12_h * vd_central)
-                vd_peripheral1 = float(cl_distribution1 / k21_h) if k21_h else 15.0
+            if api_k12 and api_k21:
+                cl_distribution1 = float(api_k12 * vd_central)
+                vd_peripheral1 = float(cl_distribution1 / api_k21) if api_k21 else 15.0
             else:
-                cl_distribution1 = 100.0
-                vd_peripheral1 = 15.0
+                cl_distribution1 = float(api_cl_distribution1) if api_cl_distribution1 is not None else 100.0
+                vd_peripheral1 = float(api_vd_peripheral1) if api_vd_peripheral1 is not None else 15.0
 
-            if k13_h and k31_h:
-                cl_distribution2 = float(k13_h * vd_central)
-                vd_peripheral2 = float(cl_distribution2 / k31_h) if k31_h else 50.0
+            if api_k13 and api_k31:
+                cl_distribution2 = float(api_k13 * vd_central)
+                vd_peripheral2 = float(cl_distribution2 / api_k31) if api_k31 else 50.0
             else:
-                cl_distribution2 = 20.0
-                vd_peripheral2 = 50.0
+                cl_distribution2 = float(api_cl_distribution2) if api_cl_distribution2 is not None else 20.0
+                vd_peripheral2 = float(api_vd_peripheral2) if api_vd_peripheral2 is not None else 50.0
 
         # 2C compatibility value
         vd_peripheral = vd_peripheral1

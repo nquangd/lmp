@@ -1,0 +1,36 @@
+# pMDI Variable Trapezoid Flow Profile Variability Parameters
+# Based on actual variability data from builtin/variability/default.toml
+# Structure: [inter_sigma, inter_dist, intra_sigma, intra_dist, dependent_field]
+# GCV values have been converted to sigma using: sigma = sqrt(ln(gcv^2 + 1))
+
+name = []
+description = []
+maneuver_type = []
+
+# Peak inspiratory flow rate (L/min) - GCV = 0.3 -> sigma = 0.2936
+pifr_Lpm = [0.2936, "lognormal", 0.2936, "lognormal", ""]
+
+# Rise time to peak flow (s) - GCV = 0.1 -> sigma = 0.0998
+rise_time_s = [0.0998, "lognormal", 0.0998, "lognormal", ""]
+
+# Inhaled volume (L) - No variability (scaled proportionally to FRC changes)
+inhaled_volume_L = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# Hold time at peak flow (s) - GCV = 0.0
+hold_time_s = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# Breath hold time after inhalation (s) - GCV = 0.0
+breath_hold_time_s = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# Exhalation flow rate (L/min) - GCV = 0.0
+exhalation_flow_Lpm = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# Bolus volume (mL) - GCV = 0.0
+bolus_volume_ml = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# Bolus delay (s) - GCV = 0.0
+bolus_delay_s = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# ET deposition scaling factor - From inhalation.ET in default.toml
+# inter_gcv = 0.235 -> sigma = 0.2318, intra_gcv = 0.15 -> sigma = 0.1492
+et_scale_factor = [0.2318, "lognormal", 0.1492, "lognormal", ""]

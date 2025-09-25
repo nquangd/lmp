@@ -1,0 +1,177 @@
+{
+  "run_id": "vt_config_20250923_170304---Subject-3_6dac0ea9",
+  "run_type": "virtual_trial",
+  "label": "config_20250923_170304---Subject-3",
+  "display_label": "config_20250923_170304 \u00b7 Subject 3",
+  "parent_run_id": "vt_config_20250923_170304_ef70d737",
+  "created": "2025-09-23T17:03:11.139495",
+  "status": "completed",
+  "workspace": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace",
+  "manifest_index": 2,
+  "total_runs": 5,
+  "task_spec": {
+    "subject_index": 2,
+    "subject_name": "healthy_reference",
+    "api": "BD",
+    "products": [
+      "test_product"
+    ],
+    "seed": 11236,
+    "apply_variability": true,
+    "variability_settings": null,
+    "study_type": "bioequivalence",
+    "study_design": "parallel",
+    "charcoal_block": false,
+    "suppress_et_absorption": false
+  },
+  "run_plan": {
+    "run_type": "virtual_trial",
+    "run_label": null,
+    "config_name": null,
+    "virtual_trial": {
+      "n_subjects": 5,
+      "base_seed": 1234,
+      "apply_variability": true,
+      "additional_products": []
+    },
+    "workspace_bindings": {
+      "api": "bd-test",
+      "product": "test-product"
+    }
+  },
+  "virtual_trial_task": {
+    "subject_index": 2,
+    "subject_name": "healthy_reference",
+    "api": "BD",
+    "products": [
+      "test_product"
+    ],
+    "seed": 11236,
+    "apply_variability": true,
+    "variability_settings": null,
+    "study_type": "bioequivalence",
+    "study_design": "parallel",
+    "charcoal_block": false,
+    "suppress_et_absorption": false
+  },
+  "last_updated": "2025-09-23T17:04:13.616982",
+  "started_at": "2025-09-23T17:03:11.146006",
+  "parameter_overrides": null,
+  "config_path": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace/configs/config_20250923_170304.json",
+  "runtime_seconds": 62.47077,
+  "result_files": [
+    "test_product__cfd_summary.parquet",
+    "test_product__pk_curve.parquet",
+    "test_product__pk_compartments.parquet",
+    "test_product__regional_auc.parquet",
+    "test_product__pbpk_regional_timeseries.parquet",
+    "test_product__deposition_bins.parquet",
+    "test_product__solver_stats.parquet",
+    "test_product__subject_params.parquet"
+  ],
+  "subject_index": 2,
+  "subject_name": "healthy_reference",
+  "api_name": "BD",
+  "seed": 11236,
+  "apply_variability": true,
+  "products": {
+    "test_product": {
+      "role": "reference",
+      "summary_metrics": {
+        "pk_cmax": 0.7704374061240349,
+        "pk_tmax_h": 840.0,
+        "pk_auc_0_last": 8063.286536089415,
+        "deposition_total_elf_pmol": 765780.0088282281,
+        "cfd_mmad": 3.639,
+        "cfd_gsd": 1.748,
+        "cfd_mt_deposition_fraction": 0.49815,
+        "pbpk_lung_final_pmol": 4718.469096275789,
+        "pbpk_lung_auc_pmol_h": 20509103.459529478,
+        "pbpk_plasma_cmax_pmol_ml": 1.7894676595067471,
+        "pbpk_plasma_tmax_h": 0.23333333333333334,
+        "pbpk_plasma_auc_pmol_h_ml": 5.202308300228535
+      },
+      "stage_metrics": {
+        "cfd": {
+          "mmad": 3.639,
+          "gsd": 1.748,
+          "mt_deposition_fraction": 0.49815,
+          "metadata_usp_deposition": 41.08,
+          "metadata_pifr_Lpm": 18.73391310450857
+        },
+        "deposition": {
+          "total_elf_initial_pmol": 765780.0088282281,
+          "region_ET_elf_pmol": 375990.58042071346,
+          "region_BB_elf_pmol": 43081.688525887344,
+          "region_bb_elf_pmol": 46040.51532242556,
+          "region_Al_elf_pmol": 300667.2245592017,
+          "metadata_total_deposited": 765780.0088282281,
+          "metadata_frc_ml": 2823.4089905334818,
+          "metadata_dose_pmol": 767269.0110094299
+        },
+        "pbbm": {
+          "lung_total_final_pmol": 4718.469096275789,
+          "lung_total_auc_pmol_h": 20509103.459529478,
+          "plasma_cmax_pmol_ml": 1.7894676595067471,
+          "plasma_tmax_h": 0.23333333333333334,
+          "plasma_auc_pmol_h_ml": 5.202308300228535,
+          "systemic_total_final_pmol": 3949.5505088077857,
+          "region_ET_total_final_pmol": 4250.0293137088365,
+          "region_ET_auc_epithelium": 174768.3429838461,
+          "region_ET_auc_tissue": 68.21857224460639,
+          "region_ET_auc_epithelium_unbound": 7605.263249069723,
+          "region_BB_total_final_pmol": 395.3577198707577,
+          "region_BB_auc_epithelium": 105554.10947118909,
+          "region_BB_auc_tissue": 142.48263738838364,
+          "region_BB_auc_epithelium_unbound": 4583.958921989575,
+          "region_bb_total_final_pmol": 49.548482384588304,
+          "region_bb_auc_epithelium": 26501.406541300894,
+          "region_bb_auc_tissue": 273.93893828656303,
+          "region_bb_auc_epithelium_unbound": 1148.2652634484375,
+          "region_Al_total_final_pmol": 23.53358031160549,
+          "region_Al_auc_epithelium": 3412.249635142879,
+          "region_Al_auc_tissue": 17.679596930435608,
+          "region_Al_auc_epithelium_unbound": 147.44311098468503
+        },
+        "pk": {
+          "cmax_conc_plasma": 0.7704374061240349,
+          "tmax_h": 840.0,
+          "auc_0_last": 8063.286536089415
+        },
+        "overall": {
+          "pk_cmax": 0.7704374061240349,
+          "pk_tmax_h": 840.0,
+          "pk_auc_0_last": 8063.286536089415,
+          "deposition_total_elf_pmol": 765780.0088282281,
+          "cfd_mmad": 3.639,
+          "cfd_gsd": 1.748,
+          "cfd_mt_deposition_fraction": 0.49815,
+          "pbpk_lung_final_pmol": 4718.469096275789,
+          "pbpk_lung_auc_pmol_h": 20509103.459529478,
+          "pbpk_plasma_cmax_pmol_ml": 1.7894676595067471,
+          "pbpk_plasma_tmax_h": 0.23333333333333334,
+          "pbpk_plasma_auc_pmol_h_ml": 5.202308300228535
+        }
+      },
+      "stage_order": [
+        "cfd",
+        "deposition",
+        "pbbm",
+        "pk",
+        "overall"
+      ],
+      "result_files": [
+        "test_product__cfd_summary.parquet",
+        "test_product__pk_curve.parquet",
+        "test_product__pk_compartments.parquet",
+        "test_product__regional_auc.parquet",
+        "test_product__pbpk_regional_timeseries.parquet",
+        "test_product__deposition_bins.parquet",
+        "test_product__solver_stats.parquet",
+        "test_product__subject_params.parquet"
+      ]
+    }
+  },
+  "exit_code": 0,
+  "completed_at": "2025-09-23T17:04:13.616760"
+}

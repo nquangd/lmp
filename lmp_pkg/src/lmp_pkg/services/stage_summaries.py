@@ -241,6 +241,7 @@ def summarise_pk(result: Optional[PKResult]) -> Dict[str, float]:
 
 def build_stage_metrics(result: RunResult) -> Dict[str, Dict[str, float]]:
     metrics: Dict[str, Dict[str, float]] = {}
+    stage_results_info = (result.metadata or {}).get("stage_results", {})
 
     if result.cfd is not None:
         cfd_metrics = summarise_cfd(result.cfd)
@@ -261,9 +262,11 @@ def build_stage_metrics(result: RunResult) -> Dict[str, Dict[str, float]]:
         pk_metrics = summarise_pk(result.pk)
         if pk_metrics:
             metrics["pk"] = pk_metrics
+            for extra_stage in ("iv_pk", "gi_pk"):
+                if extra_stage in stage_results_info:
+                    metrics.setdefault(extra_stage, {}).update(pk_metrics)
 
-    stage_results = (result.metadata or {}).get("stage_results", {})
-    for raw_stage, stage_info in stage_results.items():
+    for raw_stage, stage_info in stage_results_info.items():
         stage_key = normalize_stage_name(raw_stage)
         if not stage_key:
             continue
@@ -316,7 +319,7 @@ def determine_stage_order(result: RunResult, stage_metrics: Mapping[str, Mapping
     for stage_name in stage_times.keys():
         _append(normalize_stage_name(stage_name))
 
-    canonical = ["cfd", "deposition", "pbbm", "pbpk", "pk", "vbe"]
+    canonical = ["cfd", "deposition", "pbbm", "pbpk", "iv_pk", "gi_pk", "pk", "vbe"]
     for stage_name in canonical:
         _append(stage_name)
 

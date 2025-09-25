@@ -1,0 +1,20 @@
+{
+  "name": "test_product",
+  "ref": "test_product",
+  "overrides": {
+    "apis": {
+      "BD": {
+        "ref": "BD_TEST",
+        "dose_ug": 330.34,
+        "dose_pg": 330340000.0,
+        "usp_depo_fraction": 41.08,
+        "mmad": 4.06,
+        "gsd": 1.67
+      }
+    }
+  },
+  "id": "test-product",
+  "category": "product",
+  "updated": "2025-09-23T16:31:29.445106",
+  "created": "2025-09-23T16:31:29.445106"
+}

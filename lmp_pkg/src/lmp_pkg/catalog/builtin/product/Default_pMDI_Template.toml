@@ -1,0 +1,29 @@
+# Reference Product - Triple therapy combination
+# Based on Test_LMP_PKG.ipynb ref_product definition
+
+name = "Default pMDI"
+description = "Reference product with BD/GP/FF combination"
+device = "DFP"
+propellant = "PT010"
+
+# API-specific parameters  
+[[apis]]
+name = "BD"
+dose_pg = 3.2904e8          # 329.04e6 in notebook
+mmad = 3.53                 # Mass median aerodynamic diameter (μm)
+gsd = 1.61                  # Geometric standard deviation
+usp_depo_fraction = 41.26   # USP deposition fraction (%)
+
+[[apis]]
+name = "GP"
+dose_pg = 1.446e7           # 14.46e6 in notebook  
+mmad = 3.4
+gsd = 1.62
+usp_depo_fraction = 38.18
+
+[[apis]]
+name = "FF"
+dose_pg = 9.62e6            # 9.62e6 in notebook
+mmad = 3.4
+gsd = 1.66
+usp_depo_fraction = 38.28

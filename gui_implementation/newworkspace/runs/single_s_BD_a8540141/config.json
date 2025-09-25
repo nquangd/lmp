@@ -1,0 +1,118 @@
+{
+  "run": {
+    "stages": [
+      "deposition",
+      "pbbm",
+      "pk"
+    ],
+    "workflow_name": null,
+    "seed": 123,
+    "threads": 1,
+    "enable_numba": false,
+    "artifact_dir": "results",
+    "n_replicates": 1,
+    "stage_overrides": {}
+  },
+  "study": {
+    "study_type": "bioequivalence",
+    "design": "parallel",
+    "n_subjects": 6,
+    "population": null,
+    "charcoal_block": false
+  },
+  "deposition": {
+    "model": "clean_lung",
+    "particle_grid": "medium",
+    "params": {}
+  },
+  "pbbm": {
+    "model": "numba",
+    "epi_layers": [
+      2,
+      2,
+      1,
+      1
+    ],
+    "solver": {
+      "method": "BDF",
+      "rtol": 1e-06,
+      "atol": 1e-09,
+      "max_step": 1.0
+    },
+    "params": {},
+    "charcoal_block": false,
+    "suppress_et_absorption": false
+  },
+  "pk": {
+    "model": "pk_3c",
+    "params": {}
+  },
+  "analysis": {
+    "bioequivalence": true,
+    "custom_metrics": []
+  },
+  "subject": {
+    "ref": "healthy_reference",
+    "overrides": {
+      "age_years": 35.6,
+      "description": "Healthy reference subject for production deposition calculations",
+      "enable_variability": "False",
+      "et_scale_factor": 1.26,
+      "frc_ml": 3300.0,
+      "frc_ref_ml": 2999.6,
+      "height_cm": 183.8,
+      "mt_size": "medium",
+      "name": "healthy_reference",
+      "population": "Healthy",
+      "respiratory_rate_bpm": 15.0,
+      "sex": "M",
+      "subject_id": "healthy_reference",
+      "tidal_volume_ml": 500.0,
+      "weight_kg": 97.8
+    }
+  },
+  "api": {
+    "ref": "BD",
+    "overrides": {
+      "dose_pg": 329040000.0,
+      "dose_ug": 329.04,
+      "dose_mg": 0.32904,
+      "usp_depo_fraction": 41.26,
+      "mmad": 3.53,
+      "gsd": 1.61
+    }
+  },
+  "product": {
+    "ref": "Default_pMDI_Template",
+    "overrides": {
+      "apis": {
+        "BD": {
+          "dose_pg": 329040000.0,
+          "dose_ug": 329.04,
+          "gsd": 1.61,
+          "mmad": 3.53,
+          "ref": "BD",
+          "usp_depo_fraction": 41.26
+        }
+      }
+    }
+  },
+  "maneuver": {
+    "ref": "pMDI_variable_trapezoid",
+    "overrides": {
+      "bolus_delay_s": 0.0,
+      "bolus_volume_ml": 200.0,
+      "breath_hold_time_s": 30.0,
+      "description": "Variable trapezoid flow profile for pMDI devices",
+      "exhalation_flow_Lpm": 30.0,
+      "hold_time_s": 0.5,
+      "inhaled_volume_L": 2.0,
+      "maneuver_type": "variable_trapezoid",
+      "name": "pMDI_variable_trapezoid",
+      "pifr_Lpm": 30.0,
+      "rise_time_s": 0.4
+    }
+  },
+  "variability": null,
+  "population_variability": null
+}

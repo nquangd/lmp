@@ -105,6 +105,26 @@ class TestProduct:
         assert params["dose_pg"] == 50000.0
         assert params["mmad"] == pytest.approx(3.2)
 
+    def test_product_api_ref_lookup(self):
+        product = Product(
+            name="Flexible",
+            device="pMDI",
+            apis={
+                "slot_1": {
+                    "ref": "custom_api",
+                    "dose_ug": 320.0,
+                    "usp_depo_fraction": 40.0,
+                }
+            },
+        )
+
+        params = product.get_api_parameters("custom_api")
+        assert params["ref"] == "custom_api"
+        assert params["dose_pg"] == pytest.approx(320.0 * 1_000_000.0)
+
+        final = product.get_final_values("custom_api")
+        assert final._final_dose_pg == pytest.approx(320.0 * 1_000_000.0)
+
     def test_get_final_values(self):
         product = Product(
             name="device",

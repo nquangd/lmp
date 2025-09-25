@@ -1,0 +1,118 @@
+{
+  "run_id": "vt_config_20250923_231755_bfdb1da6",
+  "run_type": "virtual_trial_group",
+  "label": "config_20250923_231755",
+  "display_label": "config_20250923_231755",
+  "parent_run_id": null,
+  "created": "2025-09-23T23:18:00.466708",
+  "status": "completed",
+  "workspace": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace",
+  "run_plan": {
+    "run_type": "virtual_trial",
+    "run_label": null,
+    "config_name": null,
+    "stages": [
+      "gi_pk"
+    ],
+    "virtual_trial": {
+      "n_subjects": 4,
+      "base_seed": 1234,
+      "apply_variability": true,
+      "additional_products": []
+    },
+    "workspace_bindings": {
+      "api": "bd",
+      "product": "default-oral-template"
+    }
+  },
+  "virtual_trial_settings": {
+    "plan": {
+      "n_subjects": 4,
+      "base_seed": 1234,
+      "apply_variability": true,
+      "additional_products": []
+    },
+    "tasks": [
+      {
+        "subject_index": 0,
+        "subject_name": "healthy_reference",
+        "api": "BD",
+        "products": [
+          "Default_Oral_Template"
+        ],
+        "seed": 11234,
+        "apply_variability": true,
+        "variability_settings": null,
+        "study_type": "bioequivalence",
+        "study_design": "parallel",
+        "charcoal_block": false,
+        "suppress_et_absorption": false
+      },
+      {
+        "subject_index": 1,
+        "subject_name": "healthy_reference",
+        "api": "BD",
+        "products": [
+          "Default_Oral_Template"
+        ],
+        "seed": 11235,
+        "apply_variability": true,
+        "variability_settings": null,
+        "study_type": "bioequivalence",
+        "study_design": "parallel",
+        "charcoal_block": false,
+        "suppress_et_absorption": false
+      },
+      {
+        "subject_index": 2,
+        "subject_name": "healthy_reference",
+        "api": "BD",
+        "products": [
+          "Default_Oral_Template"
+        ],
+        "seed": 11236,
+        "apply_variability": true,
+        "variability_settings": null,
+        "study_type": "bioequivalence",
+        "study_design": "parallel",
+        "charcoal_block": false,
+        "suppress_et_absorption": false
+      },
+      {
+        "subject_index": 3,
+        "subject_name": "healthy_reference",
+        "api": "BD",
+        "products": [
+          "Default_Oral_Template"
+        ],
+        "seed": 11237,
+        "apply_variability": true,
+        "variability_settings": null,
+        "study_type": "bioequivalence",
+        "study_design": "parallel",
+        "charcoal_block": false,
+        "suppress_et_absorption": false
+      }
+    ],
+    "config_path": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace/configs/config_20250923_231755.json",
+    "total_runs": 4,
+    "products": [
+      "Default_Oral_Template"
+    ]
+  },
+  "child_run_ids": [
+    "vt_config_20250923_231755---Subject-1_891471f2",
+    "vt_config_20250923_231755---Subject-2_49a3422f",
+    "vt_config_20250923_231755---Subject-3_dbae2017",
+    "vt_config_20250923_231755---Subject-4_abbea9b5"
+  ],
+  "completed_runs": 4,
+  "last_updated": "2025-09-23T23:18:06.290642",
+  "total_runs": 4,
+  "last_child_updated": "vt_config_20250923_231755---Subject-4_abbea9b5",
+  "virtual_trial_summary": {
+    "subjects_path": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace/runs/vt_config_20250923_231755_bfdb1da6/results/virtual_trial_subjects.parquet",
+    "summary_path": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace/runs/vt_config_20250923_231755_bfdb1da6/results/virtual_trial_summary.parquet",
+    "n_subjects": 4
+  }
+}

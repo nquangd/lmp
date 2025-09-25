@@ -5,7 +5,7 @@ Updated version that uses the categorized API parameter layout.
 
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Set, Tuple
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QVBoxLayout, QHBoxLayout,
@@ -1374,6 +1374,7 @@ class LMPMainWindow(QMainWindow):
     def on_workspace_changed(self, workspace_path: str):
         try:
             self.workspace_manager = WorkspaceManager(workspace_path)
+            self._sync_saved_api_entries()
         except Exception as e:
             QMessageBox.critical(self, "Workspace Error", f"Could not set workspace: {str(e)}")
 
@@ -1391,9 +1392,13 @@ class LMPMainWindow(QMainWindow):
 
         # Update population tab's GI tract dropdown if applicable
         if hasattr(self.population_tab, 'update_saved_apis'):
-            # Get all configured APIs
-            configured_apis = getattr(self.product_tab, 'configured_apis', [])
-            self.population_tab.update_saved_apis(configured_apis)
+            configured_apis = []
+            for name in getattr(self.product_tab, 'configured_apis', []) or []:
+                configured_apis.append({"name": name, "ref": name})
+            try:
+                self.population_tab.update_saved_apis(configured_apis)
+            except Exception:
+                pass
 
         # Update API dropdowns in the product grid
         self.product_tab.set_configured_apis(self.product_tab.configured_apis)
@@ -1422,6 +1427,49 @@ class LMPMainWindow(QMainWindow):
             f"Catalog Integration: {catalog_status}\\n\\n"
             "Features categorized API parameters like the reference interface."
         )
+
+    def _sync_saved_api_entries(self) -> None:
+        if not hasattr(self.population_tab, "update_saved_apis"):
+            return
+
+        api_info: List[Dict[str, str]] = []
+        if self.workspace_manager is not None:
+            try:
+                entries = self.workspace_manager.list_catalog_entries("api")
+            except Exception:
+                entries = []
+
+            seen: Set[Tuple[str, str]] = set()
+
+            def _record(name_value: Optional[Any], ref_value: Optional[Any]) -> None:
+                name_str = str(name_value) if name_value is not None else None
+                ref_str = str(ref_value) if ref_value is not None else None
+                if name_str is None and ref_str is None:
+                    return
+                display = name_str or ref_str
+                ref = ref_str or display
+                key = (display, ref)
+                if key in seen:
+                    return
+                seen.add(key)
+                api_info.append({"name": display, "ref": ref})
+
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                ref = entry.get("ref") or entry.get("name") or entry.get("id")
+                display = entry.get("name") or entry.get("display_name") or ref
+                _record(display, ref)
+                overrides = entry.get("overrides")
+                if isinstance(overrides, dict):
+                    _record(overrides.get("name"), ref)
+
+        self.population_tab.update_saved_apis(api_info, replace_existing=True)
+
+        configured_names = [entry["name"] for entry in api_info if entry.get("name")]
+        if hasattr(self.product_tab, "configured_apis"):
+            self.product_tab.configured_apis = configured_names
+            self.product_tab.set_configured_apis(configured_names)
 
 
 def main():

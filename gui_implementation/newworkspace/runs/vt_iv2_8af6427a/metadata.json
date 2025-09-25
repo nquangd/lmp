@@ -1,0 +1,209 @@
+{
+  "run_id": "vt_iv2_8af6427a",
+  "run_type": "virtual_trial_group",
+  "label": "iv2",
+  "display_label": "iv2",
+  "parent_run_id": null,
+  "created": "2025-09-23T23:02:34.875054",
+  "status": "group",
+  "workspace": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace",
+  "run_plan": {
+    "run_type": "virtual_trial",
+    "run_label": "iv2",
+    "config_name": "iv-vir",
+    "stages": [
+      "iv_pk"
+    ],
+    "virtual_trial": {
+      "n_subjects": 10,
+      "base_seed": 1234,
+      "apply_variability": true,
+      "additional_products": []
+    },
+    "workspace_bindings": {
+      "api": "bd",
+      "product": "default-iv-template"
+    }
+  },
+  "virtual_trial_settings": {
+    "plan": {
+      "n_subjects": 10,
+      "base_seed": 1234,
+      "apply_variability": true,
+      "additional_products": []
+    },
+    "tasks": [
+      {
+        "subject_index": 0,
+        "subject_name": "healthy_reference",
+        "api": "BD",
+        "products": [
+          "Default_IV_Template"
+        ],
+        "seed": 11234,
+        "apply_variability": true,
+        "variability_settings": null,
+        "study_type": "bioequivalence",
+        "study_design": "parallel",
+        "charcoal_block": false,
+        "suppress_et_absorption": false
+      },
+      {
+        "subject_index": 1,
+        "subject_name": "healthy_reference",
+        "api": "BD",
+        "products": [
+          "Default_IV_Template"
+        ],
+        "seed": 11235,
+        "apply_variability": true,
+        "variability_settings": null,
+        "study_type": "bioequivalence",
+        "study_design": "parallel",
+        "charcoal_block": false,
+        "suppress_et_absorption": false
+      },
+      {
+        "subject_index": 2,
+        "subject_name": "healthy_reference",
+        "api": "BD",
+        "products": [
+          "Default_IV_Template"
+        ],
+        "seed": 11236,
+        "apply_variability": true,
+        "variability_settings": null,
+        "study_type": "bioequivalence",
+        "study_design": "parallel",
+        "charcoal_block": false,
+        "suppress_et_absorption": false
+      },
+      {
+        "subject_index": 3,
+        "subject_name": "healthy_reference",
+        "api": "BD",
+        "products": [
+          "Default_IV_Template"
+        ],
+        "seed": 11237,
+        "apply_variability": true,
+        "variability_settings": null,
+        "study_type": "bioequivalence",
+        "study_design": "parallel",
+        "charcoal_block": false,
+        "suppress_et_absorption": false
+      },
+      {
+        "subject_index": 4,
+        "subject_name": "healthy_reference",
+        "api": "BD",
+        "products": [
+          "Default_IV_Template"
+        ],
+        "seed": 11238,
+        "apply_variability": true,
+        "variability_settings": null,
+        "study_type": "bioequivalence",
+        "study_design": "parallel",
+        "charcoal_block": false,
+        "suppress_et_absorption": false
+      },
+      {
+        "subject_index": 5,
+        "subject_name": "healthy_reference",
+        "api": "BD",
+        "products": [
+          "Default_IV_Template"
+        ],
+        "seed": 11239,
+        "apply_variability": true,
+        "variability_settings": null,
+        "study_type": "bioequivalence",
+        "study_design": "parallel",
+        "charcoal_block": false,
+        "suppress_et_absorption": false
+      },
+      {
+        "subject_index": 6,
+        "subject_name": "healthy_reference",
+        "api": "BD",
+        "products": [
+          "Default_IV_Template"
+        ],
+        "seed": 11240,
+        "apply_variability": true,
+        "variability_settings": null,
+        "study_type": "bioequivalence",
+        "study_design": "parallel",
+        "charcoal_block": false,
+        "suppress_et_absorption": false
+      },
+      {
+        "subject_index": 7,
+        "subject_name": "healthy_reference",
+        "api": "BD",
+        "products": [
+          "Default_IV_Template"
+        ],
+        "seed": 11241,
+        "apply_variability": true,
+        "variability_settings": null,
+        "study_type": "bioequivalence",
+        "study_design": "parallel",
+        "charcoal_block": false,
+        "suppress_et_absorption": false
+      },
+      {
+        "subject_index": 8,
+        "subject_name": "healthy_reference",
+        "api": "BD",
+        "products": [
+          "Default_IV_Template"
+        ],
+        "seed": 11242,
+        "apply_variability": true,
+        "variability_settings": null,
+        "study_type": "bioequivalence",
+        "study_design": "parallel",
+        "charcoal_block": false,
+        "suppress_et_absorption": false
+      },
+      {
+        "subject_index": 9,
+        "subject_name": "healthy_reference",
+        "api": "BD",
+        "products": [
+          "Default_IV_Template"
+        ],
+        "seed": 11243,
+        "apply_variability": true,
+        "variability_settings": null,
+        "study_type": "bioequivalence",
+        "study_design": "parallel",
+        "charcoal_block": false,
+        "suppress_et_absorption": false
+      }
+    ],
+    "config_path": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace/configs/iv-vir.json",
+    "total_runs": 10,
+    "products": [
+      "Default_IV_Template"
+    ]
+  },
+  "child_run_ids": [
+    "vt_iv2---Subject-1_d43913b8",
+    "vt_iv2---Subject-2_dc8242d2",
+    "vt_iv2---Subject-3_13d51b4d",
+    "vt_iv2---Subject-4_33b06afc",
+    "vt_iv2---Subject-5_81f0d5b3",
+    "vt_iv2---Subject-6_5ccd4e84",
+    "vt_iv2---Subject-7_41b78821",
+    "vt_iv2---Subject-8_b4d064eb",
+    "vt_iv2---Subject-9_60027afc",
+    "vt_iv2---Subject-10_6e50bd56"
+  ],
+  "completed_runs": 0,
+  "last_updated": "2025-09-23T23:02:40.642846",
+  "total_runs": 10,
+  "last_child_updated": "vt_iv2---Subject-9_60027afc"
+}

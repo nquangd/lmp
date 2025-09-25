@@ -255,10 +255,16 @@ class BuiltinDataLoader:
                 
                 # Convert apis array to dict format expected by Product class
                 if 'apis' in data:
-                    apis_dict = {}
+                    apis_dict: Dict[str, Dict[str, Any]] = {}
                     for api_entry in data['apis']:
-                        api_name = api_entry.pop('name')
-                        apis_dict[api_name] = api_entry
+                        if not isinstance(api_entry, dict):
+                            continue
+                        slot_name = api_entry.get('name') or api_entry.get('slot')
+                        if not slot_name:
+                            continue
+                        entry_payload = {k: v for k, v in api_entry.items() if k not in {'name', 'slot'}}
+                        entry_payload.setdefault('ref', str(slot_name))
+                        apis_dict[str(slot_name)] = entry_payload
                     data['apis'] = apis_dict
                     
                 return data

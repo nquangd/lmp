@@ -1,0 +1,106 @@
+{
+  "run": {
+    "stages": [
+      "gi_pk",
+      "pk"
+    ],
+    "workflow_name": null,
+    "seed": 123,
+    "threads": 1,
+    "enable_numba": false,
+    "artifact_dir": "results",
+    "n_replicates": 1,
+    "stage_overrides": {
+      "gi_pk": {
+        "model": "gi_3c",
+        "params": {
+          "oral_dose_mg": 50.0,
+          "formulation": "immediate_release",
+          "release_duration_h": 1.0,
+          "duration_h": 24.0,
+          "n_time_points": 241
+        }
+      }
+    }
+  },
+  "study": {
+    "study_type": "bioequivalence",
+    "design": "parallel",
+    "n_subjects": 6,
+    "population": null,
+    "charcoal_block": false
+  },
+  "deposition": {
+    "model": "null",
+    "particle_grid": "medium",
+    "params": {}
+  },
+  "pbbm": {
+    "model": "numba",
+    "epi_layers": [
+      2,
+      2,
+      1,
+      1
+    ],
+    "solver": {
+      "method": "BDF",
+      "rtol": 1e-06,
+      "atol": 1e-09,
+      "max_step": 1.0
+    },
+    "params": {},
+    "charcoal_block": false,
+    "suppress_et_absorption": false
+  },
+  "pk": {
+    "model": "null",
+    "params": {}
+  },
+  "analysis": {
+    "bioequivalence": true,
+    "custom_metrics": []
+  },
+  "subject": {
+    "ref": "healthy_reference",
+    "overrides": {
+      "age_years": 35.6,
+      "description": "Healthy reference subject for production deposition calculations",
+      "enable_variability": "False",
+      "et_scale_factor": 1.26,
+      "frc_ml": 3300.0,
+      "frc_ref_ml": 2999.6,
+      "height_cm": 183.8,
+      "mt_size": "medium",
+      "name": "healthy_reference",
+      "population": "Healthy",
+      "respiratory_rate_bpm": 15.0,
+      "sex": "M",
+      "subject_id": "healthy_reference",
+      "tidal_volume_ml": 500.0,
+      "weight_kg": 97.8
+    }
+  },
+  "api": {
+    "ref": "BD",
+    "overrides": {}
+  },
+  "product": {
+    "ref": "Default_Oral_Template",
+    "overrides": {
+      "apis": {
+        "BD": {
+          "dose_pg": 329040000.0,
+          "dose_ug": 329.04,
+          "ref": "BD"
+        }
+      }
+    }
+  },
+  "maneuver": {
+    "ref": "pMDI_variable_trapezoid",
+    "overrides": {}
+  },
+  "variability": null,
+  "population_variability": null
+}

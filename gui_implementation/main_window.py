@@ -14,8 +14,9 @@ import json
 import shutil
 import logging
 import copy
+import re
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Iterable, Mapping, Tuple
+from typing import Optional, Dict, Any, List, Iterable, Mapping, Tuple, Set, Sequence, Callable, TYPE_CHECKING
 import pandas as pd
 import numpy as np
 
@@ -31,22 +32,25 @@ except Exception:  # pragma: no cover - optional dependency
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QVBoxLayout, QHBoxLayout,
     QWidget, QPushButton, QLabel, QLineEdit, QFileDialog, QMessageBox,
-    QTableWidget, QTableWidgetItem, QProgressBar, QTextEdit, QSplitter,
-    QGroupBox, QFormLayout, QComboBox, QSpinBox, QCheckBox, QListWidget,
-    QListWidgetItem, QScrollArea, QHeaderView, QAbstractItemView, QGridLayout,
-    QDoubleSpinBox
+    QTableWidget, QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QProgressBar,
+    QTextEdit, QSplitter, QGroupBox, QFormLayout, QComboBox, QSpinBox,
+    QCheckBox, QListWidget, QListWidgetItem, QScrollArea, QHeaderView,
+    QAbstractItemView, QGridLayout, QDoubleSpinBox, QStackedLayout,
+    QPlainTextEdit, QDialog, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, QProcess, QTimer, Signal
-from PySide6.QtGui import QFont, QAction, QTextCursor
+from PySide6.QtGui import QFont, QAction, QTextCursor, QDoubleValidator, QKeySequence
 
 from workspace_manager import WorkspaceManager
 from process_manager import ProcessManager
+from population_tab_widget import PopulationTabWidget
 
 # Import app_api for catalog integration
 sys.path.insert(0, str(Path(__file__).parent.parent / "lmp_pkg" / "src"))
 try:
     from lmp_pkg import app_api
     from lmp_pkg.config import AppConfig, check_catalog_coverage
+    from lmp_pkg.domain.entities import Product
     test_entries = app_api.list_catalog_entries("subject")
     CATALOG_AVAILABLE = True
     CONFIG_MODEL_AVAILABLE = True
@@ -56,11 +60,14 @@ except Exception:
     app_api = None
     AppConfig = None
     check_catalog_coverage = None
+    Product = None
 
 try:
     from lmp_pkg.catalog.builtin_loader import BuiltinDataLoader
 except Exception:
     BuiltinDataLoader = None
+
+CATALOG_ROOT = Path(__file__).parent.parent / "lmp_pkg" / "src" / "lmp_pkg" / "catalog" / "builtin"
 
 
 STAGE_DISPLAY_NAMES = {
@@ -69,11 +76,25 @@ STAGE_DISPLAY_NAMES = {
     "pbbm": "PBPK",
     "pbpk": "PBPK",
     "pk": "PK",
+    "iv_pk": "IV PK",
+    "gi_pk": "GI PK",
     "vbe": "VBE",
     "analysis": "Analysis",
     "analysis_bioequivalence": "Bioequivalence",
     "overall": "Overall",
 }
+
+
+PK_PARAM_PLACEHOLDERS = (
+    "clearance_L_h",
+    "volume_central_L",
+    "volume_peripheral_L",
+    "volume_peripheral1_L",
+    "volume_peripheral2_L",
+    "cl_distribution_L_h",
+    "cl_distribution1_L_h",
+    "cl_distribution2_L_h",
+)
 
 
 logger = logging.getLogger(__name__)
@@ -83,25 +104,6 @@ def _sanitise_product_name(name: str) -> str:
     safe = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in name.strip())
     safe = safe.strip("-")
     return safe or name.replace(" ", "_")
-
-
-def _flatten_entries(data: Dict[str, Any], prefix: Tuple[str, ...] = ()) -> List[Tuple[Tuple[str, ...], Any]]:
-    """Recursively flatten a nested mapping into path tuples."""
-    items: List[Tuple[Tuple[str, ...], Any]] = []
-    if isinstance(data, dict):
-        for key, value in data.items():
-            items.extend(_flatten_entries(value, prefix + (str(key),)))
-    else:
-        items.append((prefix, data))
-    return items
-
-
-def _format_path(path: Tuple[str, ...]) -> str:
-    return ".".join(path)
-
-
-def _parse_path(path: str) -> Tuple[str, ...]:
-    return tuple(part for part in path.split(".") if part)
 
 
 def _format_cell_value(value: Any) -> str:
@@ -141,21 +143,6 @@ def _parse_cell_value(text: str) -> Any:
         return value
 
 
-def _unflatten_entries(flat: Dict[str, Any]) -> Dict[str, Any]:
-    root: Dict[str, Any] = {}
-    for path, value in flat.items():
-        if not path:
-            continue
-        parts = _parse_path(path)
-        if not parts:
-            continue
-        cursor = root
-        for part in parts[:-1]:
-            cursor = cursor.setdefault(part, {})
-        cursor[parts[-1]] = value
-    return root
-
-
 def _apply_overrides(base: Dict[str, Any], overrides: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not overrides:
         return copy.deepcopy(base)
@@ -184,7 +171,7 @@ def _compute_overrides(base: Dict[str, Any], edited: Dict[str, Any]) -> Dict[str
         else:
             if key not in base or base_value != edited_value:
                 overrides[key] = edited_value
-
+    
     # Handle keys removed in edited data by setting to None
     for key in base.keys() - edited.keys():
         overrides[key] = None
@@ -192,43 +179,810 @@ def _compute_overrides(base: Dict[str, Any], edited: Dict[str, Any]) -> Dict[str
     return overrides
 
 
-class KeyValueTable(QTableWidget):
-    """Editable table for flattened configuration key/value pairs."""
+def _to_plain_data(value: Any) -> Any:
+    """Convert Pydantic models or nested containers into plain Python data."""
 
-    def __init__(self, key_header: str = "Parameter", value_header: str = "Value"):
-        super().__init__(0, 2)
-        self.setHorizontalHeaderLabels([key_header, value_header])
-        self.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+    if hasattr(value, "model_dump"):
+        try:
+            return value.model_dump(mode="python")
+        except Exception:
+            return value.model_dump()
+
+    if isinstance(value, Mapping):
+        return {str(key): _to_plain_data(sub_value) for key, sub_value in value.items()}
+
+    if isinstance(value, (list, tuple, set)):
+        return [_to_plain_data(item) for item in value]
+
+    return value
+
+
+class SpreadsheetWidget(QTableWidget):
+    """Simple spreadsheet-style table with paste and copy support."""
+
+    def __init__(self, headers: Sequence[str], parent: Optional[QWidget] = None):
+        super().__init__(0, len(headers), parent)
+        self._base_headers = list(headers)
+        self._update_headers(len(headers))
         self.verticalHeader().setVisible(False)
+        self.horizontalHeader().setStretchLastSection(True)
         self.setAlternatingRowColors(True)
+        self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.SelectedClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+        )
 
-    def set_data(self, data: Dict[str, Any]) -> None:
-        items = _flatten_entries(data)
-        self.setRowCount(len(items))
+    # ------------------------------------------------------------------
+    # Utility helpers
+    # ------------------------------------------------------------------
 
-        for row, (path, value) in enumerate(items):
-            key_item = QTableWidgetItem(_format_path(path))
-            key_item.setFlags(key_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.setItem(row, 0, key_item)
+    def add_empty_row(self) -> int:
+        row = self.rowCount()
+        self.insertRow(row)
+        for col in range(self.columnCount()):
+            if self.item(row, col) is None:
+                self.setItem(row, col, QTableWidgetItem(""))
+        return row
 
-            value_item = QTableWidgetItem(_format_cell_value(value))
-            self.setItem(row, 1, value_item)
+    def clear_rows(self, keep_one: bool = True) -> None:
+        self.setRowCount(0)
+        if keep_one:
+            self.add_empty_row()
+
+    def set_data(self, rows: Sequence[Sequence[Any]]) -> None:
+        self.setRowCount(0)
+        max_cols = max((len(row) for row in rows), default=self.columnCount())
+        self._ensure_column_count(max_cols)
+        for row_data in rows:
+            row_index = self.add_empty_row()
+            for col_index, value in enumerate(row_data):
+                text = "" if value is None else str(value)
+                self.item(row_index, col_index).setText(text)
+
+    def get_non_empty_rows(self) -> List[List[str]]:
+        rows: List[List[str]] = []
+        for row in range(self.rowCount()):
+            row_values: List[str] = []
+            has_content = False
+            for col in range(self.columnCount()):
+                item = self.item(row, col)
+                text = item.text().strip() if item is not None else ""
+                row_values.append(text)
+                if text:
+                    has_content = True
+            if has_content:
+                rows.append(row_values)
+        return rows
+
+    # ------------------------------------------------------------------
+    # Copy / Paste support
+    # ------------------------------------------------------------------
+
+    def keyPressEvent(self, event):  # type: ignore[override]
+        if event.matches(QKeySequence.StandardKey.Paste):
+            self._paste_from_clipboard()
+            return
+        if event.matches(QKeySequence.StandardKey.Copy):
+            self._copy_to_clipboard()
+            return
+        super().keyPressEvent(event)
+
+    def _paste_from_clipboard(self) -> None:
+        clipboard = QApplication.clipboard()
+        text = clipboard.text()
+        if not text:
+            return
+
+        rows = [row for row in text.replace("\r", "").split("\n") if row]
+        if not rows:
+            return
+
+        start_row = self.currentRow()
+        if start_row < 0:
+            start_row = self.rowCount()
+        start_col = self.currentColumn()
+        if start_col < 0:
+            start_col = 0
+
+        for r_offset, row_text in enumerate(rows):
+            columns = row_text.split("	")
+            target_row = start_row + r_offset
+            while target_row >= self.rowCount():
+                self.add_empty_row()
+            self._ensure_column_count(start_col + len(columns))
+            for c_offset, cell_text in enumerate(columns):
+                target_col = start_col + c_offset
+                if self.item(target_row, target_col) is None:
+                    self.setItem(target_row, target_col, QTableWidgetItem(""))
+                self.item(target_row, target_col).setText(cell_text)
+
+    def _copy_to_clipboard(self) -> None:
+        ranges = self.selectedRanges()
+        if not ranges:
+            return
+        selected_range = ranges[0]
+        rows: List[str] = []
+        for row in range(selected_range.topRow(), selected_range.bottomRow() + 1):
+            values: List[str] = []
+            for col in range(selected_range.leftColumn(), selected_range.rightColumn() + 1):
+                item = self.item(row, col)
+                values.append(item.text() if item is not None else "")
+            rows.append("\t".join(values))
+        QApplication.clipboard().setText("\n".join(rows))
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _ensure_column_count(self, count: int) -> None:
+        if count <= self.columnCount():
+            return
+        current_headers = list(self._base_headers)
+        while len(current_headers) < count:
+            current_headers.append(f"Value {len(current_headers)}")
+        self.setColumnCount(count)
+        self._update_headers(count, headers=current_headers)
+        for row in range(self.rowCount()):
+            for col in range(self.columnCount()):
+                if self.item(row, col) is None:
+                    self.setItem(row, col, QTableWidgetItem(""))
+
+    def _update_headers(self, count: int, headers: Optional[Sequence[str]] = None) -> None:
+        header_values = list(headers or self._base_headers)
+        if len(header_values) < count:
+            header_values.extend([f"Value {idx}" for idx in range(len(header_values), count)])
+        self.setHorizontalHeaderLabels(header_values[:count])
+
+
+
+
+TREE_KEY_ROLE = Qt.ItemDataRole.UserRole
+TREE_TYPE_ROLE = Qt.ItemDataRole.UserRole + 1
+
+
+class ParameterTreeWidget(QTreeWidget):
+    """Tree-based editor that exposes nested dictionaries and lists for editing."""
+
+    def __init__(self):
+        super().__init__()
+        self.setColumnCount(2)
+        self.setHeaderLabels(["Parameter", "Value"])
+        self.setAlternatingRowColors(True)
+        self.setUniformRowHeights(True)
+        self.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.setEditTriggers(
+            QAbstractItemView.EditTrigger.DoubleClicked
+            | QAbstractItemView.EditTrigger.SelectedClicked
+            | QAbstractItemView.EditTrigger.EditKeyPressed
+        )
+        self.itemChanged.connect(self._on_item_changed)
+
+    # ------------------------------------------------------------------
+    # Public API
+
+    def set_data(self, data: Mapping[str, Any]) -> None:
+        self.blockSignals(True)
+        self.clear()
+        root = self.invisibleRootItem()
+        for key, value in data.items():
+            self._add_item(root, key, value)
+        self.expandToDepth(0)
+        self.blockSignals(False)
 
     def get_data(self) -> Dict[str, Any]:
-        flat: Dict[str, Any] = {}
-        for row in range(self.rowCount()):
-            key_item = self.item(row, 0)
-            value_item = self.item(row, 1)
-            if key_item is None:
-                continue
-            key = key_item.text().strip()
-            if not key:
-                continue
-            value_text = value_item.text() if value_item is not None else ""
-            flat[key] = _parse_cell_value(value_text)
-        return _unflatten_entries(flat)
+        result: Dict[str, Any] = {}
+        root = self.invisibleRootItem()
+        for index in range(root.childCount()):
+            child = root.child(index)
+            key = child.data(TREE_KEY_ROLE, 0) or child.text(0)
+            result[str(key)] = self._collect(child)
+        return result
 
+    def clear_data(self) -> None:
+        self.blockSignals(True)
+        self.clear()
+        self.blockSignals(False)
+
+    def expand_all(self) -> None:
+        self.expandAll()
+
+    def collapse_all(self) -> None:
+        self.collapseAll()
+
+    def apply_filter(self, pattern: str) -> None:
+        pattern = pattern.strip().lower()
+        root = self.invisibleRootItem()
+        for index in range(root.childCount()):
+            child = root.child(index)
+            self._apply_filter(child, pattern)
+        if not pattern:
+            self.expandToDepth(0)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+
+    def _add_item(self, parent: QTreeWidgetItem, key: Any, value: Any) -> QTreeWidgetItem:
+        if isinstance(value, dict):
+            item = QTreeWidgetItem(parent, [str(key), ""])
+            item.setData(0, TREE_KEY_ROLE, str(key))
+            item.setData(0, TREE_TYPE_ROLE, "dict")
+            for sub_key, sub_value in value.items():
+                self._add_item(item, sub_key, sub_value)
+            item.setExpanded(True)
+            return item
+
+        if isinstance(value, list):
+            item = QTreeWidgetItem(parent, [str(key), ""])
+            item.setData(0, TREE_KEY_ROLE, str(key))
+            item.setData(0, TREE_TYPE_ROLE, "list")
+            for index, element in enumerate(value):
+                child = self._add_item(item, f"[{index}]", element)
+                child.setData(0, TREE_KEY_ROLE, index)
+                if isinstance(element, (dict, list)):
+                    # child already assigned its own type via recursion
+                    pass
+                else:
+                    child.setData(0, TREE_TYPE_ROLE, "list_item")
+            item.setExpanded(True)
+            return item
+
+        display = _format_cell_value(value)
+        item = QTreeWidgetItem(parent, [str(key), display])
+        item.setData(0, TREE_KEY_ROLE, str(key))
+        item.setData(0, TREE_TYPE_ROLE, "value")
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+        return item
+
+    def _collect(self, item: QTreeWidgetItem) -> Any:
+        node_type = item.data(0, TREE_TYPE_ROLE)
+
+        if node_type in {"value", "list_item"}:
+            return _parse_cell_value(item.text(1))
+
+        if node_type == "list":
+            values: List[Tuple[int, Any]] = []
+            for idx in range(item.childCount()):
+                child = item.child(idx)
+                key = child.data(0, TREE_KEY_ROLE)
+                try:
+                    index = int(key)
+                except (TypeError, ValueError):
+                    index = idx
+                values.append((index, self._collect(child)))
+            values.sort(key=lambda pair: pair[0])
+            return [value for _, value in values]
+
+        # default dict
+        data: Dict[str, Any] = {}
+        for idx in range(item.childCount()):
+            child = item.child(idx)
+            key = child.data(0, TREE_KEY_ROLE)
+            if isinstance(key, int):
+                key = str(key)
+            data[str(key)] = self._collect(child)
+        return data
+
+    def _apply_filter(self, item: QTreeWidgetItem, pattern: str) -> bool:
+        if not pattern:
+            item.setHidden(False)
+            for idx in range(item.childCount()):
+                self._apply_filter(item.child(idx), pattern)
+            return True
+
+        text_match = pattern in item.text(0).lower() or pattern in item.text(1).lower()
+        child_match = False
+        for idx in range(item.childCount()):
+            if self._apply_filter(item.child(idx), pattern):
+                child_match = True
+
+        visible = text_match or child_match
+        item.setHidden(not visible)
+        if visible and child_match:
+            item.setExpanded(True)
+        return visible
+
+    def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        # Ensure value column always reflects edits consistently; placeholder for future validation
+        if column != 1:
+            return
+
+
+class ParameterTreePanel(QWidget):
+    """Convenience wrapper around ParameterTreeWidget with filter and expand controls."""
+
+    def __init__(self, placeholder: str = "No parameters available."):
+        super().__init__()
+        self.placeholder_text = placeholder
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        controls = QHBoxLayout()
+        filter_label = QLabel("Filter:")
+        self.filter_edit = QLineEdit()
+        self.filter_edit.setPlaceholderText("Search parameters…")
+        expand_btn = QPushButton("Expand")
+        collapse_btn = QPushButton("Collapse")
+
+        controls.addWidget(filter_label)
+        controls.addWidget(self.filter_edit)
+        controls.addWidget(expand_btn)
+        controls.addWidget(collapse_btn)
+        controls.addStretch()
+        layout.addLayout(controls)
+
+        self.placeholder_label = QLabel(self.placeholder_text)
+        self.placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.placeholder_label.setStyleSheet("color: #777; font-style: italic;")
+
+        self.tree = ParameterTreeWidget()
+
+        self.stack = QStackedLayout()
+
+        placeholder_container = QWidget()
+        placeholder_layout = QVBoxLayout()
+        placeholder_layout.addStretch()
+        placeholder_layout.addWidget(self.placeholder_label)
+        placeholder_layout.addStretch()
+        placeholder_container.setLayout(placeholder_layout)
+
+        self.stack.addWidget(placeholder_container)
+        self.stack.addWidget(self.tree)
+        layout.addLayout(self.stack)
+
+        self.setLayout(layout)
+
+        expand_btn.clicked.connect(self.tree.expand_all)
+        collapse_btn.clicked.connect(self.tree.collapse_all)
+        self.filter_edit.textChanged.connect(self.tree.apply_filter)
+
+    # ------------------------------------------------------------------
+    # Public API
+
+    def set_data(self, data: Mapping[str, Any]) -> None:
+        if not data:
+            self.clear()
+            return
+        self.stack.setCurrentIndex(1)
+        self.filter_edit.blockSignals(True)
+        self.filter_edit.clear()
+        self.filter_edit.blockSignals(False)
+        self.tree.set_data(data)
+
+    def get_data(self) -> Dict[str, Any]:
+        if self.stack.currentIndex() == 0:
+            return {}
+        return self.tree.get_data()
+
+    def clear(self) -> None:
+        self.tree.clear_data()
+        self.stack.setCurrentIndex(0)
+        self.filter_edit.clear()
+
+    def setEnabled(self, enabled: bool) -> None:  # type: ignore[override]
+        super().setEnabled(enabled)
+        if not enabled:
+            self.filter_edit.clear()
+
+
+
+
+class ParameterPathSelector(QWidget):
+    """Inline widget with a path line edit and picker button."""
+
+    def __init__(self, initial: str, picker: Callable[["ParameterPathSelector"], None]):
+        super().__init__()
+        self._picker = picker
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.line_edit = QLineEdit(initial)
+        self.line_edit.setPlaceholderText("e.g. pk.params.clearance_L_h")
+        picker_btn = QPushButton("…")
+        picker_btn.setFixedWidth(28)
+        picker_btn.clicked.connect(self._on_pick)
+        layout.addWidget(self.line_edit)
+        layout.addWidget(picker_btn)
+        self.setLayout(layout)
+
+    def text(self) -> str:
+        return self.line_edit.text()
+
+    def setText(self, value: str) -> None:
+        self.line_edit.setText(value)
+
+    def _on_pick(self) -> None:
+        if self._picker:
+            self._picker(self)
+
+
+class ParameterPickerDialog(QDialog):
+    """Modal dialog allowing users to select a parameter path from a tree."""
+
+    def __init__(self, data: Mapping[str, Any], parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Parameter")
+        self.resize(520, 600)
+        layout = QVBoxLayout(self)
+        self.panel = ParameterTreePanel("No parameters available.")
+        self.panel.set_data(data)
+        layout.addWidget(self.panel)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self._accept_selection)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+        self.panel.tree.itemDoubleClicked.connect(lambda _item, _column: self._accept_selection(double_click=True))
+        self.selected_path: Optional[str] = None
+
+    def preselect_path(self, path: str) -> None:
+        if not path:
+            return
+        tokens = self._tokenise_path(path)
+        item = self._find_item(tokens)
+        if item is not None:
+            self.panel.tree.setCurrentItem(item)
+            self.panel.tree.scrollToItem(item)
+
+    def _accept_selection(self, double_click: bool = False) -> None:
+        item = self.panel.tree.currentItem()
+        if item is None or item.data(0, TREE_TYPE_ROLE) not in {"value", "list_item"}:
+            if not double_click:
+                QMessageBox.warning(self, "Select Parameter", "Choose a parameter value from the tree.")
+            return
+        self.selected_path = self._resolve_path(item)
+        self.accept()
+
+    def _resolve_path(self, item: QTreeWidgetItem) -> str:
+        parts: List[str] = []
+        current = item
+        while current and current.parent() is not None:
+            key = current.data(0, TREE_KEY_ROLE)
+            parts.append(str(key))
+            current = current.parent()
+        if current and current.data(0, TREE_KEY_ROLE) is not None:
+            parts.append(str(current.data(0, TREE_KEY_ROLE)))
+        parts.reverse()
+        path = ""
+        for token in parts:
+            cleaned = token.strip()
+            if cleaned.startswith('[') and cleaned.endswith(']'):
+                path += cleaned
+            elif cleaned.isdigit():
+                path += f"[{cleaned}]"
+            else:
+                if path and not path.endswith(']'):
+                    path += '.'
+                elif path and path.endswith(']'):
+                    path += '.'
+                path += cleaned
+        return path
+
+    def _find_item(self, tokens: Sequence[str]) -> Optional[QTreeWidgetItem]:
+        parent = self.panel.tree.invisibleRootItem()
+        current = None
+        for token in tokens:
+            normalized = token.strip()
+            if normalized.startswith('[') and normalized.endswith(']'):
+                normalized = normalized[1:-1]
+            match = None
+            for idx in range(parent.childCount()):
+                child = parent.child(idx)
+                key = child.data(0, TREE_KEY_ROLE)
+                key_str = str(key)
+                if key_str == token or key_str == normalized or key_str == f"[{normalized}]":
+                    match = child
+                    break
+                if isinstance(key, int) and normalized.isdigit() and int(normalized) == key:
+                    match = child
+                    break
+            if match is None:
+                return None
+            current = match
+            parent = current
+        return current
+
+    @staticmethod
+    def _tokenise_path(path: str) -> List[str]:
+        path = path.strip()
+        if not path:
+            return []
+        tokens: List[str] = []
+        buffer = ''
+        i = 0
+        while i < len(path):
+            char = path[i]
+            if char == '.':
+                if buffer:
+                    tokens.append(buffer)
+                    buffer = ''
+                i += 1
+                continue
+            if char == '[':
+                if buffer:
+                    tokens.append(buffer)
+                    buffer = ''
+                end = path.find(']', i)
+                if end == -1:
+                    break
+                tokens.append(path[i:end + 1])
+                i = end + 1
+                continue
+            buffer += char
+            i += 1
+        if buffer:
+            tokens.append(buffer)
+        return tokens
+
+
+class ProductAPIEditor(QWidget):
+    """Inline editor for configuring APIs associated with a product."""
+
+    COLUMN_HEADERS = ["API", "Dose (µg)", "USP Depo (%)", "MMAD (µm)", "GSD"]
+    FIELD_MAP = {
+        1: "dose_ug",
+        2: "usp_depo_fraction",
+        3: "mmad",
+        4: "gsd",
+    }
+
+    def __init__(self):
+        super().__init__()
+        self.available_apis: List[str] = []
+        self._row_names: Dict[int, Optional[str]] = {}
+        self._row_defaults: Dict[int, Dict[str, Any]] = {}
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout()
+        controls = QHBoxLayout()
+
+        controls.addWidget(QLabel("Number of APIs:"))
+        self.count_spin = QSpinBox()
+        self.count_spin.setRange(0, 10)
+        self.count_spin.valueChanged.connect(self._on_count_changed)
+        controls.addWidget(self.count_spin)
+        controls.addStretch()
+        layout.addLayout(controls)
+
+        self.table = QTableWidget(0, len(self.COLUMN_HEADERS))
+        self.table.setHorizontalHeaderLabels(self.COLUMN_HEADERS)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        for col in range(1, len(self.COLUMN_HEADERS)):
+            self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setAlternatingRowColors(True)
+        layout.addWidget(self.table)
+
+        note = QLabel("Select APIs and provide overrides. Leave numeric fields blank to keep defaults.")
+        note.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(note)
+
+        self.setLayout(layout)
+
+    def set_available_apis(self, api_names: Iterable[str]) -> None:
+        names = sorted({name for name in api_names if name})
+        self.available_apis = names
+        for row in range(self.table.rowCount()):
+            combo = self._api_combo(row)
+            if combo is None:
+                continue
+            current = combo.currentText()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("Select API...")
+            combo.addItems(self.available_apis)
+            if current and current in self.available_apis:
+                combo.setCurrentText(current)
+            combo.blockSignals(False)
+
+    def set_entries(self, entries: Iterable[Dict[str, Any]]) -> None:
+        entries = list(entries or [])
+        desired = len(entries)
+        self._set_row_count(desired)
+        self.count_spin.blockSignals(True)
+        self.count_spin.setValue(desired)
+        self.count_spin.blockSignals(False)
+
+        self._row_names = {row: None for row in range(self.table.rowCount())}
+        self._row_defaults = {row: {} for row in range(self.table.rowCount())}
+
+        for row, entry in enumerate(entries):
+            data = self._normalise_entry(entry)
+            combo = self._api_combo(row)
+            if combo is None:
+                continue
+
+            slot_name = entry.get("slot_name") or data.get("slot_name") or data.get("name")
+            if slot_name:
+                self._row_names[row] = str(slot_name)
+
+            target_name = data.get("ref") or data.get("name")
+            if target_name and target_name not in self.available_apis:
+                updated = set(self.available_apis)
+                updated.add(str(target_name))
+                self.set_available_apis(sorted(updated))
+            if target_name and target_name in [combo.itemText(i) for i in range(combo.count())]:
+                combo.setCurrentText(str(target_name))
+            else:
+                combo.setCurrentIndex(0)
+
+            defaults: Dict[str, Any] = {}
+            for col, field in self.FIELD_MAP.items():
+                editor = self._value_editor(row, col)
+                if editor is None:
+                    continue
+                value = data.get(field)
+                if value is not None and value != "":
+                    editor.setText(str(value))
+                    defaults[field] = value
+                else:
+                    editor.clear()
+            if data.get("dose_pg") is not None:
+                defaults.setdefault("dose_pg", data["dose_pg"])
+            if data.get("dose_ug") is not None:
+                defaults.setdefault("dose_ug", data["dose_ug"])
+            self._row_defaults[row] = defaults
+
+    def get_entries(self) -> List[Dict[str, Any]]:
+        entries: List[Dict[str, Any]] = []
+        for row in range(self.table.rowCount()):
+            combo = self._api_combo(row)
+            if combo is None:
+                continue
+            name = combo.currentText()
+            if not name or name == "Select API...":
+                continue
+
+            slot_name = self._row_names.get(row) or name
+            if not slot_name:
+                continue
+
+            entry_payload: Dict[str, Any] = {"name": str(slot_name)}
+            if name:
+                entry_payload["ref"] = str(name)
+
+            defaults = self._row_defaults.get(row, {})
+
+            for col, field in self.FIELD_MAP.items():
+                editor = self._value_editor(row, col)
+                if editor is None:
+                    continue
+                text = editor.text().strip()
+                if not text:
+                    if field == "dose_ug":
+                        if "dose_pg" not in entry_payload and "dose_pg" in defaults:
+                            entry_payload["dose_pg"] = defaults["dose_pg"]
+                        if "dose_ug" not in entry_payload and "dose_ug" in defaults:
+                            entry_payload["dose_ug"] = defaults["dose_ug"]
+                    else:
+                        if field in defaults:
+                            entry_payload[field] = defaults[field]
+                    continue
+                try:
+                    value = float(text)
+                except ValueError:
+                    continue
+                if field == "dose_ug":
+                    entry_payload["dose_ug"] = value
+                    entry_payload["dose_pg"] = value * 1_000_000.0
+                else:
+                    entry_payload[field] = value
+
+            if "dose_pg" not in entry_payload and "dose_pg" in defaults:
+                entry_payload["dose_pg"] = defaults["dose_pg"]
+            if "dose_ug" not in entry_payload and "dose_ug" in defaults:
+                entry_payload["dose_ug"] = defaults["dose_ug"]
+
+            entries.append(entry_payload)
+        return entries
+
+    def clear(self) -> None:
+        self.table.setRowCount(0)
+        self.count_spin.blockSignals(True)
+        self.count_spin.setValue(0)
+        self.count_spin.blockSignals(False)
+        self._row_names.clear()
+        self._row_defaults.clear()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+
+    def _on_count_changed(self, value: int) -> None:
+        self._set_row_count(value)
+
+    def _set_row_count(self, count: int) -> None:
+        current = self.table.rowCount()
+        if count == current:
+            return
+        if count < 0:
+            count = 0
+        if count < current:
+            for row in range(count, current):
+                self._row_names.pop(row, None)
+                self._row_defaults.pop(row, None)
+        self.table.setRowCount(count)
+        for row in range(current, count):
+            self._setup_row(row)
+            self._row_names.setdefault(row, None)
+            self._row_defaults.setdefault(row, {})
+
+    def _setup_row(self, row: int) -> None:
+        combo = QComboBox()
+        combo.addItem("Select API...")
+        combo.addItems(self.available_apis)
+        self.table.setCellWidget(row, 0, combo)
+
+        validator = QDoubleValidator(bottom=-1e9, top=1e9, decimals=6)
+        validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+
+        placeholders = {
+            1: "e.g. 100",
+            2: "e.g. 45",
+            3: "e.g. 1.8",
+            4: "e.g. 2.0",
+        }
+
+        for col in range(1, len(self.COLUMN_HEADERS)):
+            editor = QLineEdit()
+            editor.setValidator(validator)
+            editor.setPlaceholderText(placeholders.get(col, ""))
+            self.table.setCellWidget(row, col, editor)
+
+    def _api_combo(self, row: int) -> Optional[QComboBox]:
+        widget = self.table.cellWidget(row, 0)
+        return widget if isinstance(widget, QComboBox) else None
+
+    def _value_editor(self, row: int, col: int) -> Optional[QLineEdit]:
+        widget = self.table.cellWidget(row, col)
+        return widget if isinstance(widget, QLineEdit) else None
+
+    @staticmethod
+    def _normalise_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+        if hasattr(entry, "model_dump"):
+            entry = entry.model_dump()
+        if not isinstance(entry, dict):
+            return {}
+        data: Dict[str, Any] = {}
+
+        sources: List[Dict[str, Any]] = []
+        overrides = entry.get("overrides")
+        if isinstance(overrides, dict):
+            sources.append(overrides)
+        sources.append(entry)
+
+        for source in sources:
+            for key in ("name", "ref", "dose_pg", "dose_ug", "usp_depo_fraction", "mmad", "gsd"):
+                if key not in source:
+                    continue
+                value = source[key]
+                if value is None:
+                    continue
+                data[key] = value
+
+        if "dose_ug" not in data and "dose_pg" in data:
+            try:
+                data["dose_ug"] = float(data["dose_pg"]) / 1_000_000.0
+            except (TypeError, ValueError):
+                pass
+        if "dose_pg" not in data and "dose_ug" in data:
+            try:
+                data["dose_pg"] = float(data["dose_ug"]) * 1_000_000.0
+            except (TypeError, ValueError):
+                pass
+
+        name = data.get("name") or entry.get("name") or entry.get("ref")
+        if name:
+            data["name"] = str(name)
+        if "ref" not in data and name:
+            data["ref"] = str(name)
+        return data
 
 
 class WorkspaceTab(QWidget):
@@ -346,6 +1100,7 @@ class APIProductsTab(QWidget):
                 "loading": False,
                 "overrides": {},
                 "variability_overrides": {},
+                "api_overrides": [],
             },
             "product": {
                 "base_ref": None,
@@ -355,11 +1110,13 @@ class APIProductsTab(QWidget):
                 "loading": False,
                 "overrides": {},
                 "variability_overrides": {},
+                "api_overrides": [],
             },
         }
         self.init_ui()
         self.refresh_catalog_options("api")
         self.refresh_catalog_options("product")
+        self._refresh_available_api_names()
 
     # ------------------------------------------------------------------
     # UI setup helpers
@@ -422,11 +1179,17 @@ class APIProductsTab(QWidget):
         group_layout.addLayout(form_layout)
 
         tab_widget = QTabWidget()
-        parameters_table = KeyValueTable("Parameter", "Value")
-        tab_widget.addTab(parameters_table, "Parameters")
-        variability_table = KeyValueTable("Parameter", "Value")
-        tab_widget.addTab(variability_table, "Variability")
+        parameters_panel = ParameterTreePanel("Select a catalog entry to view parameters.")
+        tab_widget.addTab(parameters_panel, "Parameters")
+        variability_panel = ParameterTreePanel("No variability parameters available for this entry.")
+        tab_widget.addTab(variability_panel, "Variability")
         group_layout.addWidget(tab_widget)
+
+        api_editor: Optional[ProductAPIEditor] = None
+        if category == "product":
+            api_editor = ProductAPIEditor()
+            api_editor.setEnabled(False)
+            group_layout.addWidget(api_editor)
 
         button_row = QHBoxLayout()
         save_btn = QPushButton("Save")
@@ -443,19 +1206,22 @@ class APIProductsTab(QWidget):
 
         group.setLayout(group_layout)
 
-        return {
+        editor_payload = {
             "group": group,
             "saved_combo": saved_combo,
             "delete_btn": delete_btn,
             "name_edit": name_edit,
             "base_combo": base_combo,
-            "parameters_table": parameters_table,
-            "variability_table": variability_table,
+            "parameters_panel": parameters_panel,
+            "variability_panel": variability_panel,
             "tab_widget": tab_widget,
             "save_btn": save_btn,
             "save_as_btn": save_as_btn,
             "revert_btn": revert_btn,
         }
+        if api_editor is not None:
+            editor_payload["api_editor"] = api_editor
+        return editor_payload
 
     # ------------------------------------------------------------------
     # Workspace integration
@@ -465,6 +1231,7 @@ class APIProductsTab(QWidget):
         for category in ("api", "product"):
             self.refresh_saved_entries(category)
             self._update_button_states(category)
+        self._refresh_available_api_names()
 
     # ------------------------------------------------------------------
     # Catalog loading helpers
@@ -490,6 +1257,8 @@ class APIProductsTab(QWidget):
             combo.setCurrentIndex(-1)
 
         self.on_base_changed(category)
+        if category == "api":
+            self._refresh_available_api_names()
 
     def _fetch_catalog_references(self, category: str) -> List[str]:
         names: List[str] = []
@@ -569,9 +1338,14 @@ class APIProductsTab(QWidget):
                 "current_id": None,
                 "overrides": {},
                 "variability_overrides": {},
+                "api_overrides": [],
             })
-            editor["parameters_table"].setRowCount(0)
-            editor["variability_table"].setRowCount(0)
+            editor["parameters_panel"].clear()
+            editor["variability_panel"].clear()
+            api_editor = editor.get("api_editor")
+            if api_editor is not None:
+                api_editor.clear()
+                api_editor.setEnabled(False)
             self._set_variability_tab_enabled(category, False)
             self._update_button_states(category)
             return
@@ -591,6 +1365,7 @@ class APIProductsTab(QWidget):
             "current_id": None,
             "overrides": {},
             "variability_overrides": {},
+            "api_overrides": [],
         })
 
         self.populate_tables(category, overrides=None, variability_overrides=None)
@@ -601,6 +1376,10 @@ class APIProductsTab(QWidget):
         saved_combo.setCurrentIndex(0)
         saved_combo.blockSignals(False)
         self._update_button_states(category)
+        if category == "product":
+            api_editor = editor.get("api_editor")
+            if api_editor is not None:
+                api_editor.setEnabled(True)
 
     def populate_tables(
         self,
@@ -611,18 +1390,53 @@ class APIProductsTab(QWidget):
         state = self._state[category]
         editor = self._editors[category]
 
+        overrides = overrides or {}
+        variability_overrides = variability_overrides or {}
+
+        api_override_entries: List[Dict[str, Any]] = []
+        if isinstance(overrides, dict) and "apis" in overrides:
+            apis_value = overrides.get("apis")
+            if isinstance(apis_value, dict):
+                api_override_entries = [
+                    {
+                        "name": key,
+                        "slot_name": key,
+                        **(value if isinstance(value, dict) else {}),
+                    }
+                    for key, value in apis_value.items()
+                ]
+            elif isinstance(apis_value, list):
+                api_override_entries = apis_value
+            overrides = {k: v for k, v in overrides.items() if k != "apis"}
+
         resolved = _apply_overrides(state["base_data"], overrides)
-        editor["parameters_table"].set_data(resolved)
+        parameters_payload = {k: v for k, v in resolved.items() if k != "apis"}
+        editor["parameters_panel"].set_data(parameters_payload)
         state["overrides"] = copy.deepcopy(overrides) if overrides else {}
+        state["api_overrides"] = copy.deepcopy(api_override_entries)
+
+        if category == "product":
+            api_editor = editor.get("api_editor")
+            base_apis = []
+            if isinstance(state["base_data"], dict):
+                base_apis = state["base_data"].get("apis") or []
+            merged_apis = self._merge_api_entries(base_apis, api_override_entries)
+            if api_editor is not None:
+                api_editor.set_entries(merged_apis)
+        elif category != "product":
+            api_editor = editor.get("api_editor")
+            if api_editor is not None:
+                api_editor.clear()
+                api_editor.setEnabled(False)
 
         variability_base = state.get("variability_base") or {}
         if variability_base:
             resolved_var = _apply_overrides(variability_base, variability_overrides)
-            editor["variability_table"].set_data(resolved_var)
+            editor["variability_panel"].set_data(resolved_var)
             state["variability_overrides"] = copy.deepcopy(variability_overrides) if variability_overrides else {}
             self._set_variability_tab_enabled(category, True)
         else:
-            editor["variability_table"].setRowCount(0)
+            editor["variability_panel"].clear()
             state["variability_overrides"] = {}
             self._set_variability_tab_enabled(category, False)
 
@@ -657,6 +1471,8 @@ class APIProductsTab(QWidget):
             self.on_saved_entry_changed(category)
         else:
             self._update_button_states(category)
+        if category == "api":
+            self._refresh_available_api_names()
 
     def on_saved_entry_changed(self, category: str) -> None:
         editor = self._editors[category]
@@ -710,6 +1526,159 @@ class APIProductsTab(QWidget):
                 return entry
         return None
 
+    def _refresh_available_api_names(self) -> None:
+        editor = self._editors.get("product")
+        if not editor:
+            return
+        names: Set[str] = set(self._catalog_names.get("api", []))
+        saved_info: List[Dict[str, Any]] = []
+        for entry in self._saved_entries.get("api", []):
+            ref = entry.get("ref") or entry.get("name")
+            display = entry.get("name") or entry.get("display_name") or ref
+            if ref:
+                names.add(str(ref))
+            if display:
+                names.add(str(display))
+            saved_info.append({"name": display, "ref": ref})
+            overrides = entry.get("overrides")
+            if isinstance(overrides, dict):
+                candidate = overrides.get("name")
+                if candidate:
+                    names.add(str(candidate))
+                    saved_info.append({"name": candidate, "ref": ref})
+        api_editor = editor.get("api_editor")
+        if api_editor is not None:
+            api_editor.set_available_apis(sorted(names))
+        self._notify_saved_api_names(saved_info)
+
+    def _notify_saved_api_names(self, api_info: List[Dict[str, Any]]) -> None:
+        if hasattr(self, "population_tab") and isinstance(api_info, list):
+            try:
+                self.population_tab.update_saved_apis(api_info)
+            except Exception:
+                pass
+
+    @staticmethod
+    def _merge_api_entries(
+        base_entries: Optional[Iterable[Dict[str, Any]]],
+        override_entries: Optional[Iterable[Dict[str, Any]]],
+    ) -> List[Dict[str, Any]]:
+        base_list = APIProductsTab._prepare_base_api_entries(base_entries)
+
+        overrides_raw = []
+        for entry in (override_entries or []):
+            normalized = APIProductsTab._normalise_api_entry(entry)
+            if normalized:
+                overrides_raw.append(normalized)
+
+        if not overrides_raw:
+            return base_list
+
+        merged: List[Dict[str, Any]] = []
+        for idx, override in enumerate(overrides_raw):
+            if idx < len(base_list):
+                base_entry = base_list[idx]
+                combined = dict(base_entry)
+                for key, value in override.items():
+                    if value is None:
+                        continue
+                    combined[key] = value
+                slot_name = base_entry.get("slot_name") or base_entry.get("name")
+                if slot_name:
+                    combined["name"] = slot_name
+                    combined.setdefault("slot_name", slot_name)
+            else:
+                combined = dict(override)
+                if "slot_name" not in combined and combined.get("name"):
+                    combined["slot_name"] = combined["name"]
+            merged.append(combined)
+        return merged
+
+    def _apply_category_config(self, category: str, payload: Mapping[str, Any]) -> None:
+        ref = payload.get("ref")
+        if not ref:
+            return
+
+        editor = self._editors[category]
+        state = self._state[category]
+
+        base_combo = editor["base_combo"]
+        base_combo.blockSignals(True)
+        if base_combo.findData(ref) == -1:
+            base_combo.addItem(ref, ref)
+        base_combo.setCurrentIndex(base_combo.findData(ref))
+        base_combo.blockSignals(False)
+
+        state["loading"] = False
+        self.on_base_changed(category)
+
+        overrides = payload.get("overrides") if isinstance(payload, Mapping) else None
+        variability_overrides = None
+        if isinstance(payload, Mapping):
+            variability_overrides = payload.get("variability") or payload.get("variability_overrides")
+
+        self.populate_tables(category, overrides, variability_overrides)
+        editor["name_edit"].setText(payload.get("name", ""))
+        state["current_id"] = None
+        self._update_button_states(category)
+
+    def apply_config(self, config: Mapping[str, Any]) -> None:
+        if not isinstance(config, Mapping):
+            return
+
+        for category in ("api", "product"):
+            payload = config.get(category)
+            if isinstance(payload, Mapping):
+                try:
+                    self._apply_category_config(category, payload)
+                except Exception as exc:
+                    logger.warning("apply catalog config failed", category=category, error=str(exc))
+
+        self._refresh_available_api_names()
+
+    @staticmethod
+    def _normalise_api_entry(entry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if isinstance(entry, tuple) and len(entry) == 2:
+            key, payload = entry
+            base_payload: Dict[str, Any] = {"name": key, "ref": key}
+            if hasattr(payload, "model_dump"):
+                base_payload.update(payload.model_dump(exclude_none=True))
+            elif isinstance(payload, Mapping):
+                base_payload.update(payload)
+            return ProductAPIEditor._normalise_entry(base_payload)
+
+        if isinstance(entry, Mapping):
+            return ProductAPIEditor._normalise_entry(dict(entry))
+
+        return {}
+
+    @staticmethod
+    def _prepare_base_api_entries(entries: Optional[Iterable[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        if entries is None:
+            return []
+
+        if isinstance(entries, Mapping):
+            prepared: List[Dict[str, Any]] = []
+            for key, payload in entries.items():
+                base_payload: Dict[str, Any] = {"name": key, "ref": key}
+                if hasattr(payload, "model_dump"):
+                    base_payload.update(payload.model_dump(exclude_none=True))
+                elif isinstance(payload, Mapping):
+                    base_payload.update(payload)
+                normalized = ProductAPIEditor._normalise_entry(base_payload)
+                if normalized.get("name"):
+                    normalized.setdefault("slot_name", normalized["name"])
+                prepared.append(normalized)
+            return prepared
+
+        prepared_list: List[Dict[str, Any]] = []
+        for entry in entries:
+            normalized = APIProductsTab._normalise_api_entry(entry)
+            if normalized.get("name"):
+                normalized.setdefault("slot_name", normalized["name"])
+            prepared_list.append(normalized)
+        return prepared_list
+
     def revert_to_catalog(self, category: str) -> None:
         state = self._state[category]
         editor = self._editors[category]
@@ -741,15 +1710,33 @@ class APIProductsTab(QWidget):
             return
 
         base_data = state.get("base_data") or {}
-        parameters = editor["parameters_table"].get_data()
+        parameters = editor["parameters_panel"].get_data()
         overrides = _compute_overrides(base_data, parameters)
         # Remove None overrides to avoid wiping defaults unless explicit
         overrides = {k: v for k, v in overrides.items() if v is not None}
 
+        if category == "product":
+            api_editor = editor.get("api_editor")
+            api_entries = api_editor.get_entries() if api_editor is not None else []
+            api_map: Dict[str, Dict[str, Any]] = {}
+            for entry in api_entries:
+                slot = entry.get("name") or entry.get("slot")
+                if not slot:
+                    continue
+                payload = {k: v for k, v in entry.items() if k not in {"name", "slot", "slot_name"}}
+                if not payload:
+                    continue
+                api_map[str(slot)] = payload
+            if api_map:
+                overrides["apis"] = api_map
+            elif "apis" in overrides:
+                overrides.pop("apis")
+            state["api_overrides"] = api_entries
+
         variability_base = state.get("variability_base") or {}
         variability_overrides: Dict[str, Any] = {}
         if variability_base:
-            variability_values = editor["variability_table"].get_data()
+            variability_values = editor["variability_panel"].get_data()
             variability_overrides = _compute_overrides(variability_base, variability_values)
             variability_overrides = {k: v for k, v in variability_overrides.items() if v is not None}
 
@@ -829,6 +1816,8 @@ class APIProductsTab(QWidget):
             "variability_overrides": stored_payload.get("variability_overrides", {}),
         }
         self.config_updated.emit(category, data)
+        if category == "api":
+            self._refresh_available_api_names()
 
     # ------------------------------------------------------------------
     # UI state helpers
@@ -847,526 +1836,238 @@ class APIProductsTab(QWidget):
     def _set_variability_tab_enabled(self, category: str, enabled: bool) -> None:
         editor = self._editors[category]
         tab_widget: QTabWidget = editor["tab_widget"]
-        variability_table = editor["variability_table"]
-        index = tab_widget.indexOf(variability_table)
+        variability_panel = editor["variability_panel"]
+        index = tab_widget.indexOf(variability_panel)
         if index != -1:
             tab_widget.setTabEnabled(index, enabled)
             if not enabled:
-                variability_table.setRowCount(0)
+                variability_panel.clear()
 
 
 class PopulationTab(QWidget):
-    """Population editor for subjects and inhalation maneuvers."""
+    """Wrapper around the detailed population editor widget with quick shortcuts."""
 
     config_updated = Signal(str, dict)
 
     def __init__(self):
         super().__init__()
         self.workspace_manager: Optional[WorkspaceManager] = None
-        self._builtin_loader = BuiltinDataLoader() if BuiltinDataLoader is not None else None
-        self._category_titles = {"subject": "Subjects", "maneuver": "Inhalation Maneuvers"}
-        self._display_names = {"subject": "subject", "maneuver": "maneuver"}
-        self._editors: Dict[str, Dict[str, Any]] = {}
-        self._saved_entries: Dict[str, List[Dict[str, Any]]] = {"subject": [], "maneuver": []}
-        self._catalog_names: Dict[str, List[str]] = {"subject": [], "maneuver": []}
-        self._state: Dict[str, Dict[str, Any]] = {
-            "subject": {
-                "base_ref": None,
-                "base_data": {},
-                "variability_base": {},
-                "current_id": None,
-                "loading": False,
-                "overrides": {},
-                "variability_overrides": {},
-            },
-            "maneuver": {
-                "base_ref": None,
-                "base_data": {},
-                "variability_base": {},
-                "current_id": None,
-                "loading": False,
-                "overrides": {},
-                "variability_overrides": {},
-            },
-        }
-        self.init_ui()
-        self.refresh_catalog_options("subject")
-        self.refresh_catalog_options("maneuver")
+        self.population_widget = PopulationTabWidget()
+        self.population_widget.config_updated.connect(self._route_config_update)
 
-    def init_ui(self) -> None:
+        self.shortcut_combos: Dict[str, QComboBox] = {}
+
         layout = QVBoxLayout()
-
-        header = QLabel("Population")
-        header.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        layout.addWidget(header)
-
-        columns = QHBoxLayout()
-        self._editors["subject"] = self._build_editor("subject", self._category_titles["subject"])
-        self._editors["maneuver"] = self._build_editor("maneuver", self._category_titles["maneuver"])
-        columns.addWidget(self._editors["subject"]["group"])
-        columns.addWidget(self._editors["maneuver"]["group"])
-        layout.addLayout(columns)
-        layout.addStretch()
-
+        layout.addWidget(self._build_shortcuts_group())
+        layout.addWidget(self.population_widget)
         self.setLayout(layout)
-
-    def _build_editor(self, category: str, title: str) -> Dict[str, Any]:
-        group = QGroupBox(title)
-        group_layout = QVBoxLayout()
-
-        saved_layout = QHBoxLayout()
-        saved_combo = QComboBox()
-        saved_combo.addItem("Saved configurations…", None)
-        saved_combo.currentIndexChanged.connect(
-            lambda _idx, cat=category: self.on_saved_entry_changed(cat)
-        )
-        delete_btn = QPushButton("Delete")
-        delete_btn.clicked.connect(lambda _=False, cat=category: self.delete_entry(cat))
-        saved_layout.addWidget(saved_combo)
-        saved_layout.addWidget(delete_btn)
-        group_layout.addLayout(saved_layout)
-
-        form_layout = QFormLayout()
-        name_edit = QLineEdit()
-        form_layout.addRow("Name:", name_edit)
-
-        base_row = QHBoxLayout()
-        base_combo = QComboBox()
-        base_combo.currentIndexChanged.connect(
-            lambda _=False, cat=category: self.on_base_changed(cat)
-        )
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(lambda _=False, cat=category: self.refresh_catalog_options(cat, preserve_selection=True))
-        base_row.addWidget(base_combo)
-        base_row.addWidget(refresh_btn)
-        form_layout.addRow("Catalog ref:", base_row)
-
-        help_label = QLabel("Adjust subject and maneuver parameters, capturing overrides in your workspace.")
-        help_label.setWordWrap(True)
-        help_label.setStyleSheet("color: #666; font-size: 11px;")
-        form_layout.addRow("", help_label)
-
-        group_layout.addLayout(form_layout)
-
-        tab_widget = QTabWidget()
-        parameters_table = KeyValueTable("Parameter", "Value")
-        tab_widget.addTab(parameters_table, "Parameters")
-        variability_table = KeyValueTable("Parameter", "Value")
-        tab_widget.addTab(variability_table, "Variability")
-        group_layout.addWidget(tab_widget)
-
-        button_row = QHBoxLayout()
-        save_btn = QPushButton("Save")
-        save_btn.clicked.connect(lambda _=False, cat=category: self.save_entry(cat, update_existing=True))
-        save_as_btn = QPushButton("Save As")
-        save_as_btn.clicked.connect(lambda _=False, cat=category: self.save_entry(cat, update_existing=False))
-        revert_btn = QPushButton("Revert to catalog")
-        revert_btn.clicked.connect(lambda _=False, cat=category: self.revert_to_catalog(cat))
-        button_row.addWidget(save_btn)
-        button_row.addWidget(save_as_btn)
-        button_row.addWidget(revert_btn)
-        button_row.addStretch()
-        group_layout.addLayout(button_row)
-
-        group.setLayout(group_layout)
-
-        return {
-            "group": group,
-            "saved_combo": saved_combo,
-            "delete_btn": delete_btn,
-            "name_edit": name_edit,
-            "base_combo": base_combo,
-            "parameters_table": parameters_table,
-            "variability_table": variability_table,
-            "tab_widget": tab_widget,
-            "save_btn": save_btn,
-            "save_as_btn": save_as_btn,
-            "revert_btn": revert_btn,
-        }
+        self._refresh_shortcuts()
 
     def set_workspace_manager(self, workspace_manager: Optional[WorkspaceManager]) -> None:
         self.workspace_manager = workspace_manager
-        for category in ("subject", "maneuver"):
-            self.refresh_saved_entries(category)
-            self._update_button_states(category)
+        self._refresh_shortcuts()
+        self._sync_saved_api_entries()
 
-    def refresh_catalog_options(self, category: str, preserve_selection: bool = False) -> None:
-        combo = self._editors[category]["base_combo"]
-        previous = combo.currentData()
-
-        names = self._fetch_catalog_references(category)
-        self._catalog_names[category] = names
-
-        combo.blockSignals(True)
-        combo.clear()
-        for name in names:
-            combo.addItem(name, name)
-        combo.blockSignals(False)
-
-        if preserve_selection and previous in names:
-            combo.setCurrentIndex(combo.findData(previous))
-        elif names:
-            combo.setCurrentIndex(0)
-        else:
-            combo.setCurrentIndex(-1)
-
-        self.on_base_changed(category)
-
-    def _fetch_catalog_references(self, category: str) -> List[str]:
-        names: List[str] = []
-        if CATALOG_AVAILABLE and app_api is not None:
-            try:
-                names = app_api.list_catalog_entries(category)
-            except Exception:
-                names = []
-
-        if not names:
-            names = self._fallback_catalog_names(category)
-
-        return sorted(dict.fromkeys(names))
-
-    def _fallback_catalog_names(self, category: str) -> List[str]:
-        if not self._builtin_loader:
-            return []
-
-        try:
-            catalog_root = self._builtin_loader.catalog_root
-            directory = "inhalation" if category == "maneuver" else category
-            category_dir = catalog_root / directory
-            if not category_dir.exists():
-                return []
-            names: List[str] = []
-            for path in category_dir.glob("*.toml"):
-                if path.stem.startswith("Variability_"):
-                    continue
-                names.append(path.stem)
-            return names
-        except Exception:
-            return []
-
-    def _fetch_catalog_entity(self, category: str, ref: str) -> Dict[str, Any]:
-        if not ref:
-            return {}
-        if CATALOG_AVAILABLE and app_api is not None:
-            try:
-                return app_api.get_catalog_entry(category, ref)
-            except Exception:
-                pass
-        if self._builtin_loader:
-            try:
-                if category == "subject":
-                    return self._builtin_loader.load_subject_physiology(ref)
-                if category == "maneuver":
-                    return self._builtin_loader.load_inhalation_profile(ref)
-            except Exception:
-                pass
-        raise ValueError(f"Could not load {category} '{ref}' from catalog")
-
-    def _fetch_variability_data(self, category: str, ref: str) -> Optional[Dict[str, Any]]:
-        if not self._builtin_loader:
-            return None
-        directory = "inhalation" if category == "maneuver" else category
-        filename = f"Variability_{ref}"
-        try:
-            return self._builtin_loader.load_variability_file(directory, filename)
-        except Exception:
-            return None
-
-    def on_base_changed(self, category: str) -> None:
-        state = self._state[category]
-        editor = self._editors[category]
-
-        if state["loading"]:
-            return
-
-        base_combo = editor["base_combo"]
-        ref = base_combo.currentData()
-        if not ref:
-            state.update({
-                "base_ref": None,
-                "base_data": {},
-                "variability_base": {},
-                "current_id": None,
-                "overrides": {},
-                "variability_overrides": {},
-            })
-            editor["parameters_table"].setRowCount(0)
-            editor["variability_table"].setRowCount(0)
-            self._set_variability_tab_enabled(category, False)
-            self._update_button_states(category)
-            return
-
-        try:
-            base_data = self._fetch_catalog_entity(category, ref)
-        except Exception as exc:
-            QMessageBox.warning(self, "Catalog", f"Could not load {category} '{ref}': {exc}")
-            return
-
-        variability_data = self._fetch_variability_data(category, ref) or {}
-
-        state.update({
-            "base_ref": ref,
-            "base_data": base_data,
-            "variability_base": variability_data,
-            "current_id": None,
-            "overrides": {},
-            "variability_overrides": {},
-        })
-
-        self.populate_tables(category, overrides=None, variability_overrides=None)
-        editor["name_edit"].setPlaceholderText(ref)
-
-        saved_combo = editor["saved_combo"]
-        saved_combo.blockSignals(True)
-        saved_combo.setCurrentIndex(0)
-        saved_combo.blockSignals(False)
-        self._update_button_states(category)
-
-    def populate_tables(
+    def update_saved_apis(
         self,
-        category: str,
-        overrides: Optional[Dict[str, Any]],
-        variability_overrides: Optional[Dict[str, Any]],
+        saved_api_info: Iterable[Dict[str, Any]],
+        *,
+        replace_existing: bool = False,
     ) -> None:
-        state = self._state[category]
-        editor = self._editors[category]
+        """Forward saved API metadata to the detailed population widget."""
+        if hasattr(self.population_widget, "update_saved_apis"):
+            self.population_widget.update_saved_apis(
+                saved_api_info,
+                replace_existing=replace_existing,
+            )
 
-        resolved = _apply_overrides(state["base_data"], overrides)
-        editor["parameters_table"].set_data(resolved)
-        state["overrides"] = copy.deepcopy(overrides) if overrides else {}
+    def _build_shortcuts_group(self) -> QGroupBox:
+        group = QGroupBox("Quick Load")
+        grid = QGridLayout()
+        entries = [
+            ("Subject", "subject"),
+            ("Maneuver", "maneuver"),
+            ("Lung Geometry", "lung_geometry"),
+            ("GI Tract", "gi_tract"),
+        ]
+        for row, (label, category) in enumerate(entries):
+            combo = QComboBox()
+            combo.addItem(f"Select {label.lower()}...", None)
+            load_btn = QPushButton("Load")
+            load_btn.clicked.connect(lambda _=False, cat=category: self._activate_shortcut(cat))
+            self.shortcut_combos[category] = combo
+            grid.addWidget(QLabel(label + ":"), row, 0)
+            grid.addWidget(combo, row, 1)
+            grid.addWidget(load_btn, row, 2)
+        group.setLayout(grid)
+        return group
 
-        variability_base = state.get("variability_base") or {}
-        if variability_base:
-            resolved_var = _apply_overrides(variability_base, variability_overrides)
-            editor["variability_table"].set_data(resolved_var)
-            state["variability_overrides"] = copy.deepcopy(variability_overrides) if variability_overrides else {}
-            self._set_variability_tab_enabled(category, True)
-        else:
-            editor["variability_table"].setRowCount(0)
-            state["variability_overrides"] = {}
-            self._set_variability_tab_enabled(category, False)
+    def _refresh_shortcuts(self) -> None:
+        categories = {
+            "subject": "subject",
+            "maneuver": "inhalation",
+            "lung_geometry": "lung_geometry",
+            "gi_tract": "gi_tract",
+        }
+        for category, combo in self.shortcut_combos.items():
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem(f"Select {category.replace('_', ' ')}...", None)
+            for name in self._list_builtin_names(categories[category]):
+                combo.addItem(f"Builtin: {name}", {"source": "builtin", "ref": name})
+            if self.workspace_manager is not None:
+                try:
+                    entries = self.workspace_manager.list_catalog_entries(category)
+                except Exception:
+                    entries = []
+                for entry in entries:
+                    identifier = entry.get("id") or entry.get("name") or entry.get("ref")
+                    combo.addItem(f"Workspace: {identifier}", {"source": "workspace", "id": entry.get("id")})
+            combo.setCurrentIndex(0)
+            combo.blockSignals(False)
 
-    def refresh_saved_entries(self, category: str, select_id: Optional[str] = None) -> None:
-        editor = self._editors[category]
-        combo = editor["saved_combo"]
+    def _sync_saved_api_entries(self) -> None:
+        if not hasattr(self.population_widget, "update_saved_apis"):
+            return
 
-        entries: List[Dict[str, Any]] = []
+        api_info: List[Dict[str, str]] = []
         if self.workspace_manager is not None:
             try:
-                entries = self.workspace_manager.list_catalog_entries(category)
+                entries = self.workspace_manager.list_catalog_entries("api")
+            except Exception:
+                entries = []
+
+            seen: Set[Tuple[str, str]] = set()
+
+            def _record(name_value: Optional[Any], ref_value: Optional[Any]) -> None:
+                name_str = str(name_value) if name_value is not None else None
+                ref_str = str(ref_value) if ref_value is not None else None
+                if name_str is None and ref_str is None:
+                    return
+                display = name_str or ref_str
+                ref = ref_str or display
+                key = (display, ref)
+                if key in seen:
+                    return
+                seen.add(key)
+                api_info.append({"name": display, "ref": ref})
+
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                ref = entry.get("ref") or entry.get("name") or entry.get("id")
+                display = entry.get("name") or entry.get("display_name") or ref
+                _record(display, ref)
+                overrides = entry.get("overrides")
+                if isinstance(overrides, dict):
+                    _record(overrides.get("name"), ref)
+
+        self.update_saved_apis(api_info, replace_existing=True)
+
+    @staticmethod
+    def _list_builtin_names(subdir: str) -> List[str]:
+        target_dir = CATALOG_ROOT / subdir
+        if not target_dir.exists():
+            return []
+        names = [path.stem for path in target_dir.glob('*.toml') if not path.stem.startswith('Variability_')]
+        return sorted(names)
+
+    def apply_config(self, config: Mapping[str, Any]) -> None:
+        if not isinstance(config, Mapping):
+            return
+
+        subject_payload = config.get("subject")
+        if isinstance(subject_payload, Mapping) and subject_payload.get("ref"):
+            try:
+                self.population_widget.load_subject_entry(
+                    subject_payload.get("ref"),
+                    overrides=subject_payload.get("overrides"),
+                )
             except Exception as exc:
-                logger.warning("list catalog entries failed", category=category, error=str(exc))
-        self._saved_entries[category] = entries
+                logger.warning("apply subject config failed", error=str(exc))
 
-        combo.blockSignals(True)
-        combo.clear()
-        combo.addItem("Saved configurations…", None)
+        maneuver_payload = config.get("maneuver")
+        if isinstance(maneuver_payload, Mapping) and maneuver_payload.get("ref"):
+            try:
+                self.population_widget.load_maneuver_entry(
+                    maneuver_payload.get("ref"),
+                    overrides=maneuver_payload.get("overrides"),
+                )
+            except Exception as exc:
+                logger.warning("apply maneuver config failed", error=str(exc))
 
-        selected_index = 0
-        for idx, entry in enumerate(entries, start=1):
-            entry_id = entry.get("id")
-            display_name = entry.get("name") or entry.get("ref") or entry_id
-            combo.addItem(display_name, entry_id)
-            if select_id and entry_id == select_id:
-                selected_index = idx
+        lung_payload = config.get("deposition")
+        if isinstance(lung_payload, Mapping):
+            geometry_ref = (
+                lung_payload.get("lung_geometry_ref")
+                or lung_payload.get("lung_geometry")
+                or lung_payload.get("geometry_ref")
+            )
+            if geometry_ref:
+                try:
+                    self.population_widget.load_lung_geometry_entry(str(geometry_ref))
+                except Exception as exc:
+                    logger.warning("apply lung geometry failed", error=str(exc))
 
-        combo.setCurrentIndex(selected_index)
-        combo.blockSignals(False)
+        gi_payload = config.get("gi_tract") or config.get("gi")
+        if isinstance(gi_payload, Mapping) and gi_payload.get("ref"):
+            try:
+                self.population_widget.load_gi_entry(
+                    gi_payload.get("ref"),
+                    overrides=gi_payload.get("overrides"),
+                )
+            except Exception as exc:
+                logger.warning("apply gi config failed", error=str(exc))
 
-        if select_id:
-            self.on_saved_entry_changed(category)
-        else:
-            self._update_button_states(category)
-
-    def on_saved_entry_changed(self, category: str) -> None:
-        editor = self._editors[category]
-        combo = editor["saved_combo"]
-        entry_id = combo.currentData()
-        if not entry_id:
-            self._state[category]["current_id"] = None
-            self._update_button_states(category)
+    def _activate_shortcut(self, category: str) -> None:
+        combo = self.shortcut_combos.get(category)
+        if combo is None:
             return
-
-        entry = self._get_saved_entry(category, entry_id)
-        if not entry:
-            QMessageBox.warning(self, "Catalog", f"Saved {category} '{entry_id}' not found")
-            self.refresh_saved_entries(category)
+        payload = combo.currentData()
+        if not payload:
             return
+        source = payload.get("source")
+        ref = payload.get("ref") or payload.get("id")
+        if source == "builtin" and ref:
+            self._load_builtin_entry(category, ref)
+        elif source == "workspace" and self.workspace_manager is not None and ref:
+            try:
+                entry = self.workspace_manager.load_catalog_entry(category, ref)
+            except Exception:
+                entry = None
+            if entry:
+                self._load_workspace_entry(category, entry)
+        combo.setCurrentIndex(0)
 
-        state = self._state[category]
-        state["loading"] = True
-        try:
-            base_ref = entry.get("ref")
-            if base_ref:
-                base_combo = editor["base_combo"]
-                if base_combo.findData(base_ref) == -1:
-                    base_combo.addItem(base_ref, base_ref)
-                base_combo.setCurrentIndex(base_combo.findData(base_ref))
-                base_data = self._fetch_catalog_entity(category, base_ref)
-                variability_data = self._fetch_variability_data(category, base_ref) or {}
-            else:
-                base_data = {}
-                variability_data = {}
+    def _load_builtin_entry(self, category: str, ref: str) -> None:
+        if category == "subject":
+            self.population_widget.load_subject_entry(ref)
+        elif category == "maneuver":
+            self.population_widget.load_maneuver_entry(ref)
+        elif category == "lung_geometry":
+            self.population_widget.load_lung_geometry_entry(ref)
+        elif category == "gi_tract":
+            self.population_widget.load_gi_entry(ref)
 
-            state.update({
-                "base_ref": base_ref,
-                "base_data": base_data,
-                "variability_base": variability_data,
-                "current_id": entry.get("id"),
-            })
+    def _load_workspace_entry(self, category: str, entry: Dict[str, Any]) -> None:
+        ref = entry.get("ref") or entry.get("name") or entry.get("id")
+        overrides = copy.deepcopy(entry.get("overrides") or {})
+        variability = entry.get("variability_overrides")
+        if variability:
+            overrides = overrides or {}
+            overrides["variability"] = variability
+        if category == "subject" and ref:
+            self.population_widget.load_subject_entry(ref, overrides)
+        elif category == "maneuver" and ref:
+            self.population_widget.load_maneuver_entry(ref, overrides)
+        elif category == "lung_geometry" and ref:
+            self.population_widget.load_lung_geometry_entry(ref, overrides)
+        elif category == "gi_tract" and ref:
+            self.population_widget.load_gi_entry(ref, overrides)
 
-            overrides = entry.get("overrides") or {}
-            variability_overrides = entry.get("variability_overrides") or {}
-            self.populate_tables(category, overrides, variability_overrides if variability_data else None)
-            editor["name_edit"].setText(entry.get("name", ""))
-            editor["name_edit"].setPlaceholderText(base_ref or "")
-            self._update_button_states(category)
-        finally:
-            state["loading"] = False
-
-    def _get_saved_entry(self, category: str, entry_id: str) -> Optional[Dict[str, Any]]:
-        for entry in self._saved_entries.get(category, []):
-            if entry.get("id") == entry_id:
-                return entry
-        return None
-
-    def revert_to_catalog(self, category: str) -> None:
-        state = self._state[category]
-        editor = self._editors[category]
-        base_ref = state.get("base_ref")
-        if not base_ref:
-            QMessageBox.information(self, "Catalog", f"Select a base {self._display_names[category]} first.")
-            return
-
-        self.populate_tables(category, overrides=None, variability_overrides=None)
-        editor["name_edit"].clear()
-        editor["saved_combo"].blockSignals(True)
-        editor["saved_combo"].setCurrentIndex(0)
-        editor["saved_combo"].blockSignals(False)
-        state["current_id"] = None
-        self._update_button_states(category)
-
-    def save_entry(self, category: str, update_existing: bool) -> None:
-        if not self._ensure_workspace():
-            return
-
-        state = self._state[category]
-        editor = self._editors[category]
-        base_ref = state.get("base_ref")
-        if not base_ref:
-            QMessageBox.warning(self, "Catalog", f"Select a base {self._display_names[category]} before saving.")
-            return
-
-        base_data = state.get("base_data") or {}
-        parameters = editor["parameters_table"].get_data()
-        overrides = _compute_overrides(base_data, parameters)
-        overrides = {k: v for k, v in overrides.items() if v is not None}
-
-        variability_base = state.get("variability_base") or {}
-        variability_overrides: Dict[str, Any] = {}
-        if variability_base:
-            variability_values = editor["variability_table"].get_data()
-            variability_overrides = _compute_overrides(variability_base, variability_values)
-            variability_overrides = {k: v for k, v in variability_overrides.items() if v is not None}
-
-        name = editor["name_edit"].text().strip() or base_ref
-
-        payload: Dict[str, Any] = {
-            "name": name,
-            "ref": base_ref,
-            "overrides": overrides,
-        }
-        if variability_overrides:
-            payload["variability_overrides"] = variability_overrides
-
-        entry_id = state.get("current_id") if update_existing else None
-        stored = self.workspace_manager.save_catalog_entry(category, payload, entry_id=entry_id)
-        state["current_id"] = stored.get("id")
-        state["overrides"] = overrides
-        state["variability_overrides"] = variability_overrides
-
-        self.refresh_saved_entries(category, select_id=state["current_id"])
-        display = stored.get("name", base_ref)
-        QMessageBox.information(self, "Saved", f"Saved {self._display_names[category]} configuration '{display}'.")
-
-        self._emit_config_update(category, stored)
-
-    def delete_entry(self, category: str) -> None:
-        if not self.workspace_manager:
-            return
-
-        state = self._state[category]
-        editor = self._editors[category]
-        entry_id = state.get("current_id") or editor["saved_combo"].currentData()
-        if not entry_id:
-            QMessageBox.information(self, "Catalog", f"Select a saved {self._display_names[category]} to delete.")
-            return
-
-        display_name = editor["saved_combo"].currentText()
-
-        confirm = QMessageBox.question(
-            self,
-            "Delete",
-            f"Delete saved {self._display_names[category]} '{entry_id}'?",
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
-            return
-
-        try:
-            self.workspace_manager.delete_catalog_entry(category, entry_id)
-        except Exception as exc:
-            QMessageBox.warning(self, "Delete", f"Could not delete entry: {exc}")
-            return
-
-        state["current_id"] = None
-        self.refresh_saved_entries(category)
-        QMessageBox.information(self, "Deleted", f"Removed saved {self._display_names[category]} '{entry_id}'.")
-        self.config_updated.emit(
-            category,
-            {
-                "id": entry_id,
-                "ref": entry_id,
-                "name": display_name,
-                "deleted": True,
-            },
-        )
-
-    def _ensure_workspace(self) -> bool:
-        if self.workspace_manager is None:
-            QMessageBox.warning(self, "Workspace", "Select a workspace before saving configurations.")
-            return False
-        return True
-
-    def _emit_config_update(self, category: str, stored_payload: Dict[str, Any]) -> None:
-        data = {
-            "id": stored_payload.get("id"),
-            "name": stored_payload.get("name"),
-            "ref": stored_payload.get("ref"),
-            "overrides": stored_payload.get("overrides", {}),
-            "variability_overrides": stored_payload.get("variability_overrides", {}),
-        }
+    def _route_config_update(self, category: str, data: Dict[str, Any]) -> None:
         self.config_updated.emit(category, data)
-
-    def _update_button_states(self, category: str) -> None:
-        editor = self._editors[category]
-        state = self._state[category]
-        has_workspace = self.workspace_manager is not None
-        has_saved = bool(state.get("current_id"))
-
-        editor["save_btn"].setEnabled(has_workspace and has_saved)
-        editor["save_as_btn"].setEnabled(has_workspace)
-        editor["delete_btn"].setEnabled(has_workspace and has_saved)
-        editor["revert_btn"].setEnabled(bool(state.get("base_ref")))
-
-    def _set_variability_tab_enabled(self, category: str, enabled: bool) -> None:
-        editor = self._editors[category]
-        tab_widget: QTabWidget = editor["tab_widget"]
-        variability_table = editor["variability_table"]
-        index = tab_widget.indexOf(variability_table)
-        if index != -1:
-            tab_widget.setTabEnabled(index, enabled)
-            if not enabled:
-                variability_table.setRowCount(0)
+        self._refresh_shortcuts()
 
 
 class StudyDesignerTab(QWidget):
@@ -1411,30 +2112,118 @@ class StudyDesignerTab(QWidget):
                 "Compare multiple products in a virtual population.",
             ),
         ]
-        self.saved_catalog_entries: Dict[str, List[Dict[str, Any]]] = {
-            "subject": [],
-            "api": [],
-            "product": [],
-            "maneuver": [],
+        self.catalog_category_map: Dict[str, str] = {
+            "subject": "subject",
+            "gi": "gi_tract",
+            "lung": "lung_geometry",
+            "api": "api",
+            "product": "product",
+            "maneuver": "maneuver",
+        }
+        self.workspace_catalog_entries: Dict[str, List[Dict[str, Any]]] = {
+            key: [] for key in self.catalog_category_map.keys()
+        }
+        self.builtin_catalog_entries: Dict[str, List[Dict[str, Any]]] = {
+            key: [] for key in self.catalog_category_map.keys()
+        }
+        self.all_catalog_entries: Dict[str, List[Dict[str, Any]]] = {
+            key: [] for key in self.catalog_category_map.keys()
         }
         self.selected_entities: Dict[str, Optional[Dict[str, Any]]] = {
-            "subject": None,
-            "api": None,
-            "product": None,
-            "maneuver": None,
+            key: None for key in self.catalog_category_map.keys()
         }
         self.entity_combos: Dict[str, QComboBox] = {}
         self.entity_placeholder: Dict[str, str] = {
             "subject": "Configure subjects in Population tab",
+            "gi": "Configure GI physiology in Population tab",
+            "lung": "Configure lung physiology in Population tab",
             "maneuver": "Configure maneuvers in Population tab",
-            "api": "Configure APIs in API & Products tab",
+            "api": "Active API is derived from the selected product",
             "product": "Configure products in API & Products tab",
         }
         self.entity_display: Dict[str, str] = {
             "subject": "subject",
+            "gi": "GI physiology",
+            "lung": "lung physiology",
             "api": "API",
             "product": "product",
             "maneuver": "maneuver",
+        }
+        self.subject_modes: Dict[str, str] = {"subject": "model", "gi": "model", "lung": "model", "maneuver": "model"}
+        self.subject_manual_edits: Dict[str, QPlainTextEdit] = {}
+        self.subject_panels: Dict[str, QWidget] = {}
+        self.subject_summary_labels: Dict[str, QLabel] = {}
+
+        self.available_models: Dict[str, List[str]] = {}
+        if app_api is not None:
+            try:
+                self.available_models = app_api.list_available_models() or {}
+            except Exception as exc:
+                logger.warning("list available models failed", error=str(exc))
+                self.available_models = {}
+
+        self.stage_definitions: List[Dict[str, Any]] = [
+            {
+                "key": "deposition",
+                "label": "Lung Deposition",
+                "families": ["deposition"],
+                "pipeline_stage": "deposition",
+                "administrations": {"inhalation"},
+                "default_enabled": True,
+            },
+            {
+                "key": "pbbm",
+                "label": "Lung PBPK",
+                "families": ["lung_pbbm"],
+                "pipeline_stage": "pbbm",
+                "administrations": {"inhalation"},
+                "default_enabled": True,
+            },
+            {
+                "key": "gi_pk",
+                "label": "GI PK",
+                "families": ["gi_pk"],
+                "pipeline_stage": "gi_pk",
+                "administrations": {"po", "inhalation"},
+                "default_enabled": True,
+                "parameters": [
+                    {
+                        "name": "formulation",
+                        "label": "Formulation",
+                        "type": "choice",
+                        "options": [
+                            ("immediate_release", "Immediate Release"),
+                            ("enteric_coated", "Enteric Coated"),
+                            ("extended_release", "Extended Release"),
+                        ],
+                        "default": "immediate_release",
+                    },
+                ],
+            },
+            {
+                "key": "pk",
+                "label": "Systemic PK",
+                "families": ["systemic_pk"],
+                "pipeline_stage": "pk",
+                "administrations": {"po", "inhalation"},
+                "default_enabled": True,
+            },
+            {
+                "key": "iv_pk",
+                "label": "Systemic PK (IV)",
+                "families": ["iv_pk"],
+                "pipeline_stage": "iv_pk",
+                "administrations": {"iv"},
+                "default_enabled": True,
+                "parameters": [
+                    {"name": "iv_dose_duration_h", "label": "Infusion Duration (h)", "type": "double", "default": 0.0, "min": 0.0, "max": 48.0, "step": 0.1},
+                ],
+            },
+        ]
+        self.stage_controls: Dict[str, Dict[str, Any]] = {}
+        self.stage_modes: Dict[str, str] = {definition["key"]: "model" for definition in self.stage_definitions}
+        self.stage_pipeline_lookup: Dict[str, str] = {
+            definition["pipeline_stage"]: definition["key"] for definition in self.stage_definitions
         }
         self.init_ui()
         self.populate_catalog_defaults()
@@ -1442,147 +2231,23 @@ class StudyDesignerTab(QWidget):
     def init_ui(self):
         layout = QVBoxLayout()
 
-        # Header
         header = QLabel("Study Designer")
         header.setFont(QFont("Arial", 16, QFont.Weight.Bold))
         layout.addWidget(header)
 
-        # Scroll area for form
         scroll = QScrollArea()
         form_widget = QWidget()
         form_layout = QVBoxLayout()
 
-        # Study metadata
-        study_group = QGroupBox("Study Details")
-        study_layout = QFormLayout()
+        form_layout.addWidget(self._build_study_details_group())
+        form_layout.addWidget(self._build_administration_group())
+        form_layout.addWidget(self._build_subject_configuration_group())
+        form_layout.addWidget(self._build_product_configuration_group())
+        form_layout.addWidget(self._build_run_configuration_group())
+        form_layout.addWidget(self._build_stage_configuration_group())
 
-        self.study_name_edit = QLineEdit()
-        self.study_name_edit.setPlaceholderText("Study or configuration name")
-        study_layout.addRow("Config Name:", self.study_name_edit)
-
-        study_group.setLayout(study_layout)
-        form_layout.addWidget(study_group)
-
-        # Subject configuration
-        subject_group = QGroupBox("Subject Configuration")
-        subject_layout = QFormLayout()
-
-        self.subject_ref_combo = QComboBox()
-        self.subject_ref_combo.setEditable(False)
-        self.subject_ref_combo.currentIndexChanged.connect(
-            lambda _=0, cat="subject": self.on_entity_selection_changed(cat)
-        )
-
-        subject_layout.addRow("Subject Reference:", self.subject_ref_combo)
-        subject_group.setLayout(subject_layout)
-        form_layout.addWidget(subject_group)
-
-        # API configuration
-        api_group = QGroupBox("API Configuration")
-        api_layout = QFormLayout()
-
-        self.api_ref_combo = QComboBox()
-        self.api_ref_combo.setEditable(False)
-        self.api_ref_combo.currentIndexChanged.connect(
-            lambda _=0, cat="api": self.on_entity_selection_changed(cat)
-        )
-
-        api_layout.addRow("API Reference:", self.api_ref_combo)
-        api_group.setLayout(api_layout)
-        form_layout.addWidget(api_group)
-
-        # Product configuration
-        product_group = QGroupBox("Product Configuration")
-        product_layout = QFormLayout()
-
-        self.product_ref_combo = QComboBox()
-        self.product_ref_combo.setEditable(False)
-        self.product_ref_combo.currentIndexChanged.connect(
-            lambda _=0, cat="product": self.on_entity_selection_changed(cat)
-        )
-
-        product_layout.addRow("Product Reference:", self.product_ref_combo)
-        product_group.setLayout(product_layout)
-        form_layout.addWidget(product_group)
-
-        # Maneuver configuration
-        maneuver_group = QGroupBox("Maneuver Configuration")
-        maneuver_layout = QFormLayout()
-
-        self.maneuver_ref_combo = QComboBox()
-        self.maneuver_ref_combo.setEditable(False)
-        self.maneuver_ref_combo.currentIndexChanged.connect(
-            lambda _=0, cat="maneuver": self.on_entity_selection_changed(cat)
-        )
-
-        maneuver_layout.addRow("Maneuver Reference:", self.maneuver_ref_combo)
-        maneuver_group.setLayout(maneuver_layout)
-        form_layout.addWidget(maneuver_group)
-
-        self.entity_combos = {
-            "subject": self.subject_ref_combo,
-            "api": self.api_ref_combo,
-            "product": self.product_ref_combo,
-            "maneuver": self.maneuver_ref_combo,
-        }
-        for category in self.entity_combos:
+        for category in self.entity_combos.keys():
             self._set_combo_placeholder(category)
-
-        # Model configuration
-        models_group = QGroupBox("Model Configuration")
-        models_layout = QFormLayout()
-
-        self.deposition_model_combo = QComboBox()
-        self.deposition_model_combo.addItems(["clean_lung", "null"])
-
-        self.pbbm_model_combo = QComboBox()
-        self.pbbm_model_combo.addItems(["numba"])
-
-        self.pk_model_combo = QComboBox()
-        self.pk_model_combo.addItems(["pk_1c", "pk_2c", "pk_3c", "null"])
-
-        models_layout.addRow("Deposition Model:", self.deposition_model_combo)
-        models_layout.addRow("PBBM Model:", self.pbbm_model_combo)
-        models_layout.addRow("PK Model:", self.pk_model_combo)
-
-        models_group.setLayout(models_layout)
-        form_layout.addWidget(models_group)
-
-        # Run configuration
-        run_group = QGroupBox("Run Configuration")
-        run_layout = QFormLayout()
-
-        self.run_type_combo = QComboBox()
-        for value, label, _ in self.run_type_definitions:
-            self.run_type_combo.addItem(label, userData=value)
-        self.run_type_combo.currentIndexChanged.connect(self.on_run_type_changed)
-        run_layout.addRow("Run Type:", self.run_type_combo)
-
-        self.run_label_edit = QLineEdit()
-        self.run_label_edit.setPlaceholderText("Friendly run label (optional)")
-        run_layout.addRow("Run Label:", self.run_label_edit)
-
-        self.run_type_help_label = QLabel()
-        self.run_type_help_label.setWordWrap(True)
-        self.run_type_help_label.setStyleSheet("color: #555; font-size: 11px;")
-        run_layout.addRow(self.run_type_help_label)
-
-        self.run_type_notice_label = QLabel()
-        self.run_type_notice_label.setWordWrap(True)
-        self.run_type_notice_label.setStyleSheet("color: #888; font-size: 11px;")
-        run_layout.addRow(self.run_type_notice_label)
-
-        self.seed_spin = QSpinBox()
-        self.seed_spin.setRange(1, 999999)
-        self.seed_spin.setValue(123)
-
-        self.stages_edit = QLineEdit("deposition,pbbm,pk")
-
-        run_layout.addRow("Seed:", self.seed_spin)
-        run_layout.addRow("Stages:", self.stages_edit)
-
-        run_group.setLayout(run_layout)
-        form_layout.addWidget(run_group)
 
         # Sweep configuration (basic)
         self.sweep_group = QGroupBox("Parameter Sweep")
@@ -1591,19 +2256,40 @@ class StudyDesignerTab(QWidget):
         self.sweep_enabled = QCheckBox("Enable Parameter Sweep")
         sweep_layout.addWidget(self.sweep_enabled)
 
-        self.sweep_params_edit = QTextEdit()
-        self.sweep_params_edit.setPlaceholderText(
-            'Enter sweep parameters as JSON:\n'
-            '{\n'
-            '  "pk.model": ["pk_1c", "pk_2c"],\n'
-            '  "run.seed": [123, 456, 789]\n'
-            '}'
+        sweep_help = QLabel(
+            "One parameter per row. Paste data directly from a spreadsheet; columns after the first are interpreted as sweep values."
         )
-        self.sweep_params_edit.setMaximumHeight(100)
-        self.sweep_params_edit.setEnabled(False)
-        self.sweep_enabled.toggled.connect(self.sweep_params_edit.setEnabled)
+        sweep_help.setWordWrap(True)
+        sweep_help.setStyleSheet("color: #666; font-size: 11px;")
+        sweep_layout.addWidget(sweep_help)
 
-        sweep_layout.addWidget(self.sweep_params_edit)
+        self.sweep_table = SpreadsheetWidget([
+            "Parameter Path",
+            "Value 1",
+            "Value 2",
+            "Value 3",
+            "Value 4",
+        ])
+        self.sweep_table.setMinimumHeight(160)
+        self.sweep_table.setEnabled(False)
+        self.sweep_table.add_empty_row()
+        sweep_layout.addWidget(self.sweep_table)
+
+        sweep_button_row = QHBoxLayout()
+        self.sweep_select_param_btn = QPushButton("Select Parameter…")
+        self.sweep_select_param_btn.clicked.connect(self.select_sweep_parameter)
+        self.sweep_add_row_btn = QPushButton("Add Row")
+        self.sweep_add_row_btn.clicked.connect(lambda: self.sweep_table.add_empty_row())
+        self.sweep_remove_row_btn = QPushButton("Remove Selected")
+        self.sweep_remove_row_btn.clicked.connect(self.remove_selected_sweep_rows)
+        sweep_button_row.addWidget(self.sweep_select_param_btn)
+        sweep_button_row.addWidget(self.sweep_add_row_btn)
+        sweep_button_row.addWidget(self.sweep_remove_row_btn)
+        sweep_button_row.addStretch()
+        sweep_layout.addLayout(sweep_button_row)
+
+        self.sweep_enabled.toggled.connect(self._on_sweep_enabled_changed)
+        self._on_sweep_enabled_changed(False)
         self.sweep_group.setLayout(sweep_layout)
         form_layout.addWidget(self.sweep_group)
 
@@ -1641,13 +2327,23 @@ class StudyDesignerTab(QWidget):
         self.observed_time_unit_combo.addItem("Seconds", userData="s")
         observed_form.addRow("Time unit:", self.observed_time_unit_combo)
 
-        self.observed_manual_data_edit = QTextEdit()
-        self.observed_manual_data_edit.setPlaceholderText(
-            "Optional JSON series overrides (e.g. {\"time_s\": [...], \"values\": [...]} or "
-            "[{\"time\": 0, \"value\": 0}, …])"
-        )
-        self.observed_manual_data_edit.setMaximumHeight(100)
-        observed_form.addRow("Observed series JSON:", self.observed_manual_data_edit)
+        self.observed_series_table = SpreadsheetWidget(["Time", "Value"])
+        self.observed_series_table.setMinimumHeight(160)
+        self.observed_series_table.add_empty_row()
+        observed_form.addRow("Observed series:", self.observed_series_table)
+
+        observed_button_row = QHBoxLayout()
+        load_series_btn = QPushButton("Load Series…")
+        load_series_btn.clicked.connect(self.load_observed_series)
+        clear_series_btn = QPushButton("Clear Series")
+        clear_series_btn.clicked.connect(self.clear_observed_series)
+        observed_button_row.addWidget(load_series_btn)
+        observed_button_row.addWidget(clear_series_btn)
+        observed_button_row.addStretch()
+        observed_form.addRow("", observed_button_row)
+
+        self.observed_load_button = load_series_btn
+        self.observed_clear_button = clear_series_btn
 
         self.timeseries_weight_spin = QDoubleSpinBox()
         self.timeseries_weight_spin.setDecimals(4)
@@ -1708,26 +2404,56 @@ class StudyDesignerTab(QWidget):
 
         def _make_scalar_row(row: int, label: str):
             checkbox = QCheckBox(label)
+            value_label = QLabel("Observed")
             value_spin = QDoubleSpinBox()
             value_spin.setDecimals(6)
             value_spin.setRange(-1_000_000_000.0, 1_000_000_000.0)
+            weight_label = QLabel("Weight")
             weight_spin = QDoubleSpinBox()
             weight_spin.setDecimals(4)
             weight_spin.setRange(0.0, 1_000_000.0)
             weight_spin.setValue(1.0)
             scalar_layout.addWidget(checkbox, row, 0)
-            scalar_layout.addWidget(QLabel("Observed"), row, 1)
+            scalar_layout.addWidget(value_label, row, 1)
             scalar_layout.addWidget(value_spin, row, 2)
-            scalar_layout.addWidget(QLabel("Weight"), row, 3)
+            scalar_layout.addWidget(weight_label, row, 3)
             scalar_layout.addWidget(weight_spin, row, 4)
-            return checkbox, value_spin, weight_spin
+            return checkbox, value_spin, weight_spin, value_label, weight_label
 
-        self.pk_auc_checkbox, self.pk_auc_value_spin, self.pk_auc_weight_spin = _make_scalar_row(0, "PK AUC0_t")
-        self.cfd_mmad_checkbox, self.cfd_mmad_value_spin, self.cfd_mmad_weight_spin = _make_scalar_row(1, "CFD MMAD (um)")
-        self.cfd_gsd_checkbox, self.cfd_gsd_value_spin, self.cfd_gsd_weight_spin = _make_scalar_row(2, "CFD GSD")
-        self.cfd_mt_checkbox, self.cfd_mt_value_spin, self.cfd_mt_weight_spin = _make_scalar_row(3, "CFD MT fraction")
+        (
+            self.pk_auc_checkbox,
+            self.pk_auc_value_spin,
+            self.pk_auc_weight_spin,
+            self.pk_auc_value_label,
+            self.pk_auc_weight_label,
+        ) = _make_scalar_row(0, "PK AUC0_t")
+
+        (
+            self.cfd_mmad_checkbox,
+            self.cfd_mmad_value_spin,
+            self.cfd_mmad_weight_spin,
+            self.cfd_mmad_value_label,
+            self.cfd_mmad_weight_label,
+        ) = _make_scalar_row(1, "CFD MMAD (um)")
+
+        (
+            self.cfd_gsd_checkbox,
+            self.cfd_gsd_value_spin,
+            self.cfd_gsd_weight_spin,
+            self.cfd_gsd_value_label,
+            self.cfd_gsd_weight_label,
+        ) = _make_scalar_row(2, "CFD GSD")
+
+        (
+            self.cfd_mt_checkbox,
+            self.cfd_mt_value_spin,
+            self.cfd_mt_weight_spin,
+            self.cfd_mt_value_label,
+            self.cfd_mt_weight_label,
+        ) = _make_scalar_row(3, "CFD MT fraction")
 
         scalar_group.setLayout(scalar_layout)
+        self.scalar_target_group = scalar_group
         pe_layout.addWidget(scalar_group)
 
         deposition_group = QGroupBox("Deposition Fraction Targets")
@@ -1758,6 +2484,7 @@ class StudyDesignerTab(QWidget):
         deposition_layout.addLayout(fraction_weight_row)
 
         deposition_group.setLayout(deposition_layout)
+        self.deposition_group = deposition_group
         pe_layout.addWidget(deposition_group)
 
         self.parameter_estimation_group.setLayout(pe_layout)
@@ -1846,11 +2573,707 @@ class StudyDesignerTab(QWidget):
 
         # Initialise run-type dependent UI state
         self.on_run_type_changed()
+        self.on_administration_changed()
+
+    def _build_study_details_group(self) -> QWidget:
+        group = QGroupBox("Study Details")
+        layout = QFormLayout()
+
+        self.study_name_edit = QLineEdit()
+        self.study_name_edit.setPlaceholderText("Study or configuration name")
+        layout.addRow("Config Name:", self.study_name_edit)
+
+        group.setLayout(layout)
+        return group
+
+    def _build_administration_group(self) -> QWidget:
+        group = QGroupBox("Administration")
+        layout = QFormLayout()
+
+        self.administration_combo = QComboBox()
+        self.administration_combo.addItem("Intravenous (IV)", userData="iv")
+        self.administration_combo.addItem("Oral (PO)", userData="po")
+        self.administration_combo.addItem("Inhalation", userData="inhalation")
+        self.administration_combo.currentIndexChanged.connect(self.on_administration_changed)
+        layout.addRow("Route:", self.administration_combo)
+
+        help_label = QLabel("Administration route controls which subject attributes and stages are available.")
+        help_label.setWordWrap(True)
+        help_label.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addRow(help_label)
+
+        group.setLayout(layout)
+        return group
+
+    def _create_subject_attribute_panel(self, category: str, title: str) -> QWidget:
+        group = QGroupBox(title)
+        vbox = QVBoxLayout()
+
+        tabs = QTabWidget()
+        tabs.setObjectName(f"{category}_subject_tabs")
+
+        model_widget = QWidget()
+        model_form = QFormLayout()
+        combo = QComboBox()
+        combo.setEditable(False)
+        combo.currentIndexChanged.connect(
+            lambda _=0, cat=category: self.on_entity_selection_changed(cat)
+        )
+        summary_label = QLabel("Select a configuration from the catalog or workspace.")
+        summary_label.setWordWrap(True)
+        model_form.addRow("Reference:", combo)
+        model_form.addRow("Details:", summary_label)
+        model_widget.setLayout(model_form)
+
+        manual_widget = QWidget()
+        manual_layout = QVBoxLayout()
+        manual_edit = QPlainTextEdit()
+        manual_edit.setPlaceholderText("Manual overrides (JSON).")
+        manual_layout.addWidget(manual_edit)
+        manual_widget.setLayout(manual_layout)
+
+        tabs.addTab(model_widget, "Model")
+        tabs.addTab(manual_widget, "Manual")
+        tabs.currentChanged.connect(
+            lambda index, cat=category: self.on_subject_mode_changed(cat, index)
+        )
+
+        self.entity_combos[category] = combo
+        self.subject_manual_edits[category] = manual_edit
+        self.subject_summary_labels[category] = summary_label
+        self.subject_panels[category] = group
+
+        vbox.addWidget(tabs)
+        group.setLayout(vbox)
+        return group
+
+    def _build_subject_configuration_group(self) -> QWidget:
+        group = QGroupBox("Subject Configuration")
+        layout = QVBoxLayout()
+
+        layout.addWidget(self._create_subject_attribute_panel("subject", "Demographics"))
+        layout.addWidget(self._create_subject_attribute_panel("gi", "GI Physiology"))
+        layout.addWidget(self._create_subject_attribute_panel("lung", "Lung Physiology"))
+        layout.addWidget(self._create_subject_attribute_panel("maneuver", "Inhalation Maneuver"))
+
+        group.setLayout(layout)
+        return group
+
+    def _build_product_configuration_group(self) -> QWidget:
+        group = QGroupBox("Products")
+        layout = QFormLayout()
+
+        self.product_ref_combo = QComboBox()
+        self.product_ref_combo.setEditable(False)
+        self.product_ref_combo.currentIndexChanged.connect(
+            lambda _=0, cat="product": self.on_entity_selection_changed(cat)
+        )
+        self.product_info_label = QLabel("Select a saved product configuration.")
+        self.product_info_label.setWordWrap(True)
+
+        layout.addRow("Product Reference:", self.product_ref_combo)
+        layout.addRow("Product Details:", self.product_info_label)
+
+        self.api_info_label = QLabel("Active API is derived from the selected product.")
+        self.api_info_label.setWordWrap(True)
+        layout.addRow("Active API:", self.api_info_label)
+
+        group.setLayout(layout)
+
+        self.entity_combos.update({
+            "product": self.product_ref_combo,
+        })
+        return group
+
+    def _build_run_configuration_group(self) -> QWidget:
+        group = QGroupBox("Simulation Run")
+        layout = QFormLayout()
+
+        self.run_type_combo = QComboBox()
+        for value, label, _ in self.run_type_definitions:
+            self.run_type_combo.addItem(label, userData=value)
+        self.run_type_combo.currentIndexChanged.connect(self.on_run_type_changed)
+        layout.addRow("Run Type:", self.run_type_combo)
+
+        self.run_label_edit = QLineEdit()
+        self.run_label_edit.setPlaceholderText("Friendly run label (optional)")
+        layout.addRow("Run Label:", self.run_label_edit)
+
+        self.run_type_help_label = QLabel()
+        self.run_type_help_label.setWordWrap(True)
+        self.run_type_help_label.setStyleSheet("color: #555; font-size: 11px;")
+        layout.addRow(self.run_type_help_label)
+
+        self.run_type_notice_label = QLabel()
+        self.run_type_notice_label.setWordWrap(True)
+        self.run_type_notice_label.setStyleSheet("color: #888; font-size: 11px;")
+        layout.addRow(self.run_type_notice_label)
+
+        self.seed_spin = QSpinBox()
+        self.seed_spin.setRange(1, 999_999)
+        self.seed_spin.setValue(123)
+        layout.addRow("Seed:", self.seed_spin)
+
+        group.setLayout(layout)
+        return group
+
+    def _build_stage_configuration_group(self) -> QWidget:
+        group = QGroupBox("Stages and Models")
+        layout = QVBoxLayout()
+
+        info_label = QLabel("Toggle stages and configure models for the selected administration route.")
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(info_label)
+
+        for definition in self.stage_definitions:
+            row_widget = self._create_stage_row(definition)
+            layout.addWidget(row_widget)
+
+        layout.addStretch()
+        group.setLayout(layout)
+        return group
+
+    def _create_stage_row(self, definition: Dict[str, Any]) -> QWidget:
+        row_widget = QWidget()
+        row_layout = QVBoxLayout()
+
+        include_checkbox = QCheckBox(definition["label"])
+        include_checkbox.setChecked(definition.get("default_enabled", True))
+        include_checkbox.toggled.connect(
+            lambda checked, key=definition["key"]: self._on_stage_enabled_changed(key, checked)
+        )
+
+        tabs = QTabWidget()
+        tabs.setObjectName(f"stage_tabs_{definition['key']}")
+
+        model_widget = QWidget()
+        model_form = QFormLayout()
+        model_combo = QComboBox()
+        families = definition.get("families", [])
+        models: List[str] = []
+        for family in families:
+            models.extend(self.available_models.get(family, []))
+        if not models:
+            models = ["default"]
+        seen: Set[str] = set()
+        for model_name in models:
+            if model_name in seen:
+                continue
+            seen.add(model_name)
+            model_combo.addItem(model_name, userData=model_name)
+        model_form.addRow("Model:", model_combo)
+
+        param_widgets: Dict[str, QWidget] = {}
+        for param in definition.get("parameters", []) or []:
+            name = param.get("name") or param.get("label")
+            if not name:
+                continue
+            label_text = param.get("label") or name
+            param_type = param.get("type", "double")
+            widget: QWidget
+            if param_type == "double":
+                spin = QDoubleSpinBox()
+                spin.setDecimals(int(param.get("decimals", 6)))
+                spin.setRange(float(param.get("min", -1e12)), float(param.get("max", 1e12)))
+                spin.setSingleStep(float(param.get("step", 0.1)))
+                spin.setValue(float(param.get("default", 0.0)))
+                widget = spin
+            elif param_type == "int":
+                spin_i = QSpinBox()
+                spin_i.setRange(int(param.get("min", -1_000_000)), int(param.get("max", 1_000_000)))
+                spin_i.setSingleStep(int(param.get("step", 1)))
+                spin_i.setValue(int(param.get("default", 0)))
+                widget = spin_i
+            elif param_type == "choice":
+                combo_widget = QComboBox()
+                options = param.get("options", [])
+                default_value = param.get("default")
+                selected_index = 0
+                for idx, option in enumerate(options):
+                    if isinstance(option, (list, tuple)) and len(option) >= 2:
+                        value, display = option[0], option[1]
+                    else:
+                        value = option
+                        display = option
+                    combo_widget.addItem(str(display), userData=value)
+                    if default_value is not None and value == default_value:
+                        selected_index = idx
+                combo_widget.setCurrentIndex(selected_index)
+                widget = combo_widget
+            else:
+                line_edit = QLineEdit()
+                default_text = param.get("default")
+                if default_text is not None:
+                    line_edit.setText(str(default_text))
+                widget = line_edit
+
+            param_widgets[name] = widget
+            model_form.addRow(f"{label_text}:", widget)
+
+        model_widget.setLayout(model_form)
+
+        manual_widget = QWidget()
+        manual_layout = QVBoxLayout()
+        manual_layout.setContentsMargins(0, 0, 0, 0)
+        manual_widget.setLayout(manual_layout)
+
+        table_stage_keys = {"cfd", "deposition"}
+        manual_widgets: List[QWidget] = []
+        if definition["key"] in table_stage_keys:
+            manual_edit = SpreadsheetWidget(["Field", "Value"])
+            manual_edit.setMinimumHeight(140)
+            manual_edit.add_empty_row()
+            manual_edit.itemChanged.connect(lambda _item, key=definition["key"]: self._clear_stage_manual_payload(key))
+            manual_layout.addWidget(manual_edit)
+
+            load_json_btn = QPushButton("Load JSON…")
+            load_json_btn.setFixedWidth(120)
+            load_json_btn.clicked.connect(
+                lambda _=False, key=definition["key"], table=manual_edit: self.load_stage_manual_json(key, table)
+            )
+            select_param_btn = QPushButton("Select Parameter…")
+            select_param_btn.setFixedWidth(150)
+            select_param_btn.clicked.connect(
+                lambda _=False, key=definition["key"], table=manual_edit: self.select_stage_manual_parameter(key, table)
+            )
+
+            button_row = QHBoxLayout()
+            button_row.addWidget(select_param_btn)
+            button_row.addWidget(load_json_btn)
+            button_row.addStretch()
+            manual_layout.addLayout(button_row)
+            manual_widget_type = "table"
+            manual_loaded_payload = None
+            manual_widgets = [manual_edit, select_param_btn, load_json_btn]
+        else:
+            manual_edit = QPlainTextEdit()
+            manual_edit.setPlaceholderText("Manual data overrides or file references.")
+            manual_layout.addWidget(manual_edit)
+            manual_widget_type = "text"
+            manual_loaded_payload = None
+            manual_widgets = [manual_edit]
+
+        tabs.addTab(model_widget, "Model")
+        tabs.addTab(manual_widget, "Manual")
+        tabs.currentChanged.connect(
+            lambda index, key=definition["key"]: self.on_stage_mode_changed(key, index)
+        )
+
+        row_layout.addWidget(include_checkbox)
+        row_layout.addWidget(tabs)
+        row_widget.setLayout(row_layout)
+
+        self.stage_controls[definition["key"]] = {
+            "definition": definition,
+            "checkbox": include_checkbox,
+            "model_combo": model_combo,
+            "manual_edit": manual_edit,
+            "manual_widget_type": manual_widget_type,
+            "manual_loaded_payload": manual_loaded_payload,
+            "tabs": tabs,
+            "container": row_widget,
+            "param_widgets": param_widgets,
+            "manual_widgets": manual_widgets,
+        }
+
+        self._on_stage_enabled_changed(definition["key"], include_checkbox.isChecked())
+
+        return row_widget
+
+    def current_administration(self) -> str:
+        if not hasattr(self, "administration_combo"):
+            return "iv"
+        value = self.administration_combo.currentData()
+        return value or "iv"
+
+    def on_subject_mode_changed(self, category: str, tab_index: int) -> None:
+        self.subject_modes[category] = "model" if tab_index == 0 else "manual"
+
+    def on_stage_mode_changed(self, stage_key: str, tab_index: int) -> None:
+        self.stage_modes[stage_key] = "model" if tab_index == 0 else "manual"
+        self._update_stage_manual_controls_state(stage_key)
+
+    def _on_stage_enabled_changed(self, stage_key: str, enabled: bool) -> None:
+        controls = self.stage_controls.get(stage_key)
+        if not controls:
+            return
+        tabs = controls.get("tabs")
+        if isinstance(tabs, QTabWidget):
+            tabs.setEnabled(enabled)
+        self._update_stage_manual_controls_state(stage_key, stage_enabled=enabled)
+
+    def _update_stage_manual_controls_state(self, stage_key: str, stage_enabled: Optional[bool] = None) -> None:
+        controls = self.stage_controls.get(stage_key)
+        if not controls:
+            return
+        checkbox = controls.get("checkbox")
+        if stage_enabled is None and isinstance(checkbox, QCheckBox):
+            stage_enabled = checkbox.isChecked()
+        if stage_enabled is None:
+            stage_enabled = True
+
+        manual_widgets = controls.get("manual_widgets") or []
+        for widget in manual_widgets:
+            if isinstance(widget, QWidget):
+                widget.setEnabled(stage_enabled)
+
+    def on_administration_changed(self) -> None:
+        admin = self.current_administration()
+
+        subject_visibility = {
+            "subject": True,
+            "gi": admin in {"po", "inhalation"},
+            "lung": admin == "inhalation",
+            "maneuver": admin == "inhalation",
+        }
+        for category, panel in self.subject_panels.items():
+            panel.setVisible(subject_visibility.get(category, False))
+
+        for definition in self.stage_definitions:
+            controls = self.stage_controls.get(definition["key"])
+            if not controls:
+                continue
+            visible = admin in definition.get("administrations", set())
+            container = controls["container"]
+            container.setVisible(visible)
+            checkbox: QCheckBox = controls["checkbox"]
+            checkbox.blockSignals(True)
+            checkbox.setChecked(visible and definition.get("default_enabled", True))
+            checkbox.blockSignals(False)
+            self._on_stage_enabled_changed(definition["key"], checkbox.isChecked())
+
+        for category in self.entity_combos.keys():
+            if category not in self.selected_entities or self.selected_entities[category] is not None:
+                continue
+            self._set_combo_placeholder(category)
+
+        self.update_stage_parameters_from_product(route=admin)
+        self._update_parameter_estimation_visibility()
+
+    def _resolve_active_product_payload(self) -> Optional[Dict[str, Any]]:
+        if app_api is None or Product is None:
+            return None
+
+        entry = self.selected_entities.get("product")
+        if not isinstance(entry, Mapping):
+            return None
+
+        ref = entry.get("ref") or entry.get("name")
+        overrides = copy.deepcopy(entry.get("overrides") or {})
+
+        base_payload: Dict[str, Any] = {}
+        if ref:
+            try:
+                base_payload = app_api.get_catalog_entry("product", ref) or {}
+            except Exception as exc:  # pragma: no cover - catalog read failure
+                logger.debug("load product catalog entry failed: %s", exc)
+
+        if overrides:
+            base_payload = _apply_overrides(base_payload, overrides)
+
+        return base_payload or None
+
+    def _auto_select_api_from_product(self) -> None:
+        product_entry = self.selected_entities.get("product")
+        if not isinstance(product_entry, Mapping):
+            self.selected_entities["api"] = None
+            label = getattr(self, "api_info_label", None)
+            if isinstance(label, QLabel):
+                label.setText("Select a product configuration to derive API details.")
+            return
+
+        product_payload = self._resolve_active_product_payload()
+        api_ref: Optional[str] = None
+        api_overrides: Dict[str, Any] = {}
+
+        raw_api_payload: Dict[str, Any] = {}
+
+        if isinstance(product_payload, Mapping):
+            apis = product_payload.get("apis")
+            if isinstance(apis, Mapping) and apis:
+                for slot, payload in apis.items():
+                    if isinstance(payload, Mapping):
+                        candidate_ref = payload.get("ref") or slot
+                        if candidate_ref:
+                            api_ref = str(candidate_ref)
+                            raw_api_payload = copy.deepcopy(payload)
+                            api_overrides = copy.deepcopy(payload)
+                            break
+
+        if not api_ref:
+            previous_api = self.selected_entities.get("api")
+            if isinstance(previous_api, Mapping):
+                api_ref = previous_api.get("ref") or previous_api.get("name")
+                api_overrides = copy.deepcopy(previous_api.get("overrides") or {})
+
+        if not api_ref:
+            self.selected_entities["api"] = None
+            label = getattr(self, "api_info_label", None)
+            if isinstance(label, QLabel):
+                label.setText("No API resolved from selected product.")
+            return
+
+        if isinstance(api_overrides, Mapping):
+            api_overrides = {
+                key: value for key, value in api_overrides.items() if key != "ref"
+            }
+        else:
+            api_overrides = {}
+
+        synthetic_api = {
+            "ref": api_ref,
+            "name": api_ref,
+            "overrides": api_overrides,
+            "source": "product",
+        }
+        self.selected_entities["api"] = synthetic_api
+        self._update_entity_summary("api")
+        label = getattr(self, "api_info_label", None)
+        if isinstance(label, QLabel):
+            info_parts = [f"Ref: {api_ref}"]
+            if isinstance(raw_api_payload, Mapping):
+                numeric_pairs = [
+                    f"{key}={value}"
+                    for key, value in raw_api_payload.items()
+                    if isinstance(value, (int, float))
+                ]
+                if numeric_pairs:
+                    info_parts.append(", ".join(numeric_pairs))
+            label.setText("; ".join(info_parts))
+
+        self.update_stage_parameters_from_product()
+
+    def _apply_stage_selection(self, stages: Sequence[str], route: Optional[str]) -> None:
+        stage_set = {str(stage) for stage in stages}
+        for definition in self.stage_definitions:
+            if route and route not in definition.get("administrations", set()):
+                continue
+            controls = self.stage_controls.get(definition["key"])
+            if not controls:
+                continue
+            container = controls.get("container")
+            if container is not None and not container.isVisible():
+                continue
+            checkbox: QCheckBox = controls["checkbox"]
+            desired = definition["pipeline_stage"] in stage_set
+            if checkbox.isChecked() != desired:
+                checkbox.blockSignals(True)
+                checkbox.setChecked(desired)
+                checkbox.blockSignals(False)
+
+    def _apply_stage_override_values(self, overrides: Mapping[str, Mapping[str, Any]]) -> None:
+        for stage_key, payload in overrides.items():
+            controls = self.stage_controls.get(stage_key)
+            if not controls:
+                continue
+
+            if self.stage_modes.get(stage_key, "model") != "model":
+                continue
+
+            container = controls.get("container")
+            if container is not None and not container.isVisible():
+                continue
+
+            tabs: QTabWidget = controls.get("tabs")
+            if tabs is not None and tabs.currentIndex() != 0:
+                tabs.blockSignals(True)
+                tabs.setCurrentIndex(0)
+                tabs.blockSignals(False)
+
+            model_value = payload.get("model")
+            if model_value:
+                model_combo: QComboBox = controls.get("model_combo")
+                if model_combo is not None:
+                    idx = model_combo.findData(model_value)
+                    if idx < 0:
+                        idx = model_combo.findText(str(model_value))
+                    if idx < 0:
+                        model_combo.addItem(str(model_value), userData=model_value)
+                        idx = model_combo.findData(model_value)
+                    if idx >= 0:
+                        model_combo.blockSignals(True)
+                        model_combo.setCurrentIndex(idx)
+                        model_combo.blockSignals(False)
+
+            params = payload.get("params") or {}
+            param_widgets = controls.get("param_widgets", {})
+            for name, value in params.items():
+                widget = param_widgets.get(name)
+                if widget is None or value is None:
+                    continue
+                if isinstance(widget, QDoubleSpinBox):
+                    widget.blockSignals(True)
+                    widget.setValue(float(value))
+                    widget.blockSignals(False)
+                elif isinstance(widget, QSpinBox):
+                    widget.blockSignals(True)
+                    widget.setValue(int(value))
+                    widget.blockSignals(False)
+                elif isinstance(widget, QComboBox):
+                    idx = widget.findData(value)
+                    if idx < 0:
+                        idx = widget.findText(str(value))
+                    if idx < 0:
+                        widget.addItem(str(value), userData=value)
+                        idx = widget.findData(value)
+                    if idx >= 0:
+                        widget.blockSignals(True)
+                        widget.setCurrentIndex(idx)
+                        widget.blockSignals(False)
+                elif isinstance(widget, QLineEdit):
+                    widget.blockSignals(True)
+                    widget.setText(str(value))
+                    widget.blockSignals(False)
+
+    def update_stage_parameters_from_product(self, route: Optional[str] = None) -> None:
+        if app_api is None or Product is None:
+            return
+
+        admin_route = route or self.current_administration()
+        product_payload = self._resolve_active_product_payload()
+        if not product_payload:
+            return
+
+        api_name = self._current_api_reference()
+        if not api_name:
+            return
+
+        try:
+            product_model = Product.model_validate(product_payload)
+        except Exception as exc:  # pragma: no cover - validation failure
+            logger.debug("product validation failed for stage defaults: %s", exc)
+            return
+
+        product_route = product_model.route
+        if product_route and route is None and product_route != self.current_administration():
+            self._set_administration_ui(product_route)
+            return
+
+        effective_route = route or product_route or self.current_administration()
+
+        stage_list = product_model.get_route_stage_list(effective_route)
+        if stage_list:
+            self._apply_stage_selection(stage_list, effective_route)
+
+        overrides = product_model.build_stage_overrides(effective_route, api_name=api_name)
+        if overrides:
+            self._apply_stage_override_values(overrides)
+        self._update_parameter_estimation_visibility()
+
+    def _update_parameter_estimation_visibility(self) -> None:
+        if not hasattr(self, "scalar_target_group"):
+            return
+
+        route = self.current_administration()
+        inhalation = route == "inhalation"
+
+        cfd_rows = [
+            (
+                self.cfd_mmad_checkbox,
+                self.cfd_mmad_value_spin,
+                self.cfd_mmad_weight_spin,
+                self.cfd_mmad_value_label,
+                self.cfd_mmad_weight_label,
+            ),
+            (
+                self.cfd_gsd_checkbox,
+                self.cfd_gsd_value_spin,
+                self.cfd_gsd_weight_spin,
+                self.cfd_gsd_value_label,
+                self.cfd_gsd_weight_label,
+            ),
+            (
+                self.cfd_mt_checkbox,
+                self.cfd_mt_value_spin,
+                self.cfd_mt_weight_spin,
+                self.cfd_mt_value_label,
+                self.cfd_mt_weight_label,
+            ),
+        ]
+
+        for widgets in cfd_rows:
+            for widget in widgets:
+                widget.setVisible(inhalation)
+        if not inhalation:
+            for row in cfd_rows:
+                checkbox = row[0]
+                checkbox.setChecked(False)
+
+        if hasattr(self, "deposition_group"):
+            self.deposition_group.setVisible(inhalation)
+            if not inhalation and self.deposition_fraction_enable.isChecked():
+                self.deposition_fraction_enable.setChecked(False)
+
+    def _stage_model_value(self, stage_key: str, default: str) -> str:
+        controls = self.stage_controls.get(stage_key)
+        if not controls:
+            return default
+        combo: QComboBox = controls["model_combo"]
+        value = combo.currentData()
+        if not value or value == "default":
+            value = combo.currentText()
+        return str(value) if value else default
+
+    def _manual_json_for_category(self, category: str) -> Dict[str, Any]:
+        edit = self.subject_manual_edits.get(category)
+        label = self.entity_display.get(category, category)
+        if edit is None:
+            return {}
+        text = edit.toPlainText().strip()
+        if not text:
+            raise ValueError(f"Provide manual data for {label} or switch back to model selection.")
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Manual data for {label} must be valid JSON: {exc}") from exc
+        if not isinstance(data, Mapping):
+            raise ValueError(f"Manual data for {label} must be a JSON object containing at least a 'ref' value.")
+        return dict(data)
+
+    def _build_entity_payload(self, category: str, *, required: bool, allow_manual: bool) -> Optional[Dict[str, Any]]:
+        mode = self.subject_modes.get(category, "model") if category in self.subject_modes else "model"
+        if allow_manual and mode == "manual":
+            manual_payload = self._manual_json_for_category(category)
+            payload: Dict[str, Any] = {}
+            ref_value = manual_payload.get("ref") or manual_payload.get("reference")
+            if ref_value:
+                payload["ref"] = str(ref_value)
+            overrides = manual_payload.get("overrides")
+            if overrides is None:
+                manual_copy = manual_payload.copy()
+                manual_copy.pop("ref", None)
+                manual_copy.pop("reference", None)
+                if manual_copy:
+                    overrides = manual_copy
+            if overrides:
+                if not isinstance(overrides, Mapping):
+                    raise ValueError(f"Manual overrides for {self.entity_display.get(category, category)} must be a dictionary")
+                payload["overrides"] = copy.deepcopy(overrides)
+            if not payload:
+                if required:
+                    raise ValueError(f"Provide a reference for {self.entity_display.get(category, category)} in manual mode.")
+                return None
+            return payload
+
+        payload = self._entity_config_payload(category, required=required)
+        return payload if payload else None
+
+    def _set_administration_ui(self, value: str) -> None:
+        if not hasattr(self, "administration_combo"):
+            return
+        idx = self.administration_combo.findData(value)
+        if idx < 0 or self.administration_combo.currentIndex() == idx:
+            return
+        self.administration_combo.blockSignals(True)
+        self.administration_combo.setCurrentIndex(idx)
+        self.administration_combo.blockSignals(False)
+        self.on_administration_changed()
 
     def _entry_identifier(self, entry: Dict[str, Any]) -> Optional[str]:
         if not isinstance(entry, dict):
             return None
-        return entry.get("id") or entry.get("ref")
+        return entry.get("display_id") or entry.get("id") or entry.get("ref")
 
     def _set_combo_placeholder(self, category: str) -> None:
         combo = self.entity_combos.get(category)
@@ -1863,12 +3286,16 @@ class StudyDesignerTab(QWidget):
         combo.setCurrentIndex(0)
         combo.blockSignals(False)
         self.selected_entities[category] = None
+        self._update_entity_summary(category)
+        if category == "product":
+            self._auto_select_api_from_product()
 
     def _populate_combo_from_saved(
         self,
         category: str,
         entries: List[Dict[str, Any]],
         select_id: Optional[str] = None,
+        select_ref: Optional[str] = None,
     ) -> None:
         combo = self.entity_combos.get(category)
         if not combo:
@@ -1877,17 +3304,30 @@ class StudyDesignerTab(QWidget):
         combo.blockSignals(True)
         combo.clear()
 
+        placeholder = self.entity_placeholder.get(category, "Select entry")
+        combo.addItem(placeholder, None)
+
         if not entries:
+            combo.setCurrentIndex(0)
             combo.blockSignals(False)
-            self._set_combo_placeholder(category)
+            self.selected_entities[category] = None
             return
 
         target_index = 0
-        for idx, entry in enumerate(entries):
+        for idx, entry in enumerate(entries, start=1):
             identifier = self._entry_identifier(entry)
-            display = entry.get("name") or entry.get("ref") or identifier or "(unnamed)"
-            combo.addItem(display, copy.deepcopy(entry))
+            ref_value = entry.get("ref")
+            source = entry.get("source", "workspace")
+            display_name = entry.get("name") or ref_value or identifier or "(unnamed)"
+            if source == "builtin":
+                label = f"Builtin: {display_name}"
+            else:
+                label = f"Workspace: {display_name}"
+            combo.addItem(label, copy.deepcopy(entry))
+
             if select_id and identifier == select_id:
+                target_index = idx
+            elif select_ref and ref_value and str(ref_value) == str(select_ref) and target_index == 0:
                 target_index = idx
 
         combo.setCurrentIndex(target_index)
@@ -1896,77 +3336,568 @@ class StudyDesignerTab(QWidget):
 
     def on_entity_selection_changed(self, category: str) -> None:
         combo = self.entity_combos.get(category)
-        if not combo:
+        if combo:
+            data = combo.currentData()
+            if isinstance(data, dict):
+                self.selected_entities[category] = copy.deepcopy(data)
+            else:
+                self.selected_entities[category] = None
+        self._update_entity_summary(category)
+        if category == "product":
+            self._update_parameter_estimation_visibility()
+            self._auto_select_api_from_product()
+        elif category == "api":
+            self.update_stage_parameters_from_product()
+
+    def _set_combo_value(self, combo: QComboBox, value: Optional[str]) -> None:
+        if combo is None or value is None:
             return
-        data = combo.currentData()
-        if isinstance(data, dict):
-            self.selected_entities[category] = copy.deepcopy(data)
+        value_str = str(value)
+        combo.blockSignals(True)
+        idx = combo.findText(value_str)
+        if idx == -1:
+            combo.addItem(value_str)
+            idx = combo.findText(value_str)
+        combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+
+    def _collect_workspace_bindings(self) -> Dict[str, str]:
+        bindings: Dict[str, str] = {}
+        for category, entry in self.selected_entities.items():
+            if isinstance(entry, Mapping) and entry.get("source") == "workspace" and entry.get("id"):
+                bindings[category] = str(entry["id"])
+        return bindings
+
+    def _apply_entity_payload(self, category: str, payload: Optional[Mapping[str, Any]]) -> None:
+        if not isinstance(payload, Mapping) or not payload.get("ref"):
+            self._set_combo_placeholder(category)
+            return
+
+        entry = {
+            "id": payload.get("id"),
+            "ref": payload.get("ref"),
+            "name": payload.get("name") or payload.get("ref"),
+            "overrides": copy.deepcopy(payload.get("overrides") or {}),
+            "variability_overrides": copy.deepcopy(payload.get("variability") or payload.get("variability_overrides") or {}),
+            "source": payload.get("source", "config"),
+        }
+
+        combo = self.entity_combos.get(category)
+        if combo is not None:
+            combo.blockSignals(True)
+            combo.clear()
+            display = entry.get("name") or entry.get("ref") or "(unnamed)"
+            combo.addItem(display, copy.deepcopy(entry))
+            combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+
+        self.selected_entities[category] = copy.deepcopy(entry)
+        self._update_entity_summary(category)
+
+    def _select_entity(
+        self,
+        category: str,
+        binding_id: Optional[str],
+        payload: Optional[Mapping[str, Any]],
+    ) -> None:
+        entries = list(self.all_catalog_entries.get(category, []))
+
+        target_id = binding_id
+        target_ref = None
+        if isinstance(payload, Mapping):
+            target_ref = payload.get("ref")
+            if target_id is None:
+                target_id = payload.get("id") or payload.get("display_id")
+
+            identifier = target_id or (f"config::{target_ref}" if target_ref else None)
+            if identifier and not any(self._entry_identifier(entry) == identifier for entry in entries):
+                synthetic = {
+                    "id": identifier,
+                    "display_id": identifier,
+                    "ref": target_ref,
+                    "name": payload.get("name") or target_ref or identifier,
+                    "overrides": copy.deepcopy(payload.get("overrides") or {}),
+                    "variability_overrides": copy.deepcopy(payload.get("variability") or payload.get("variability_overrides") or {}),
+                    "source": payload.get("source", "config"),
+                }
+                entries.append(synthetic)
+        self.all_catalog_entries[category] = entries
+        self._populate_combo_from_saved(
+            category,
+            entries,
+            select_id=target_id,
+            select_ref=target_ref,
+        )
+
+        # Merge overrides/variability into selected entity for accuracy
+        if isinstance(payload, Mapping):
+            selected = self.selected_entities.get(category)
+            if isinstance(selected, dict):
+                selected["overrides"] = copy.deepcopy(payload.get("overrides") or {})
+                selected["variability_overrides"] = copy.deepcopy(
+                    payload.get("variability") or payload.get("variability_overrides") or {}
+                )
+                selected.setdefault("ref", payload.get("ref"))
+                selected.setdefault("name", payload.get("name") or payload.get("ref"))
+                selected.setdefault("source", payload.get("source", selected.get("source", "config")))
+                self._update_entity_summary(category)
+                if category == "product":
+                    self._update_parameter_estimation_visibility()
+
+    def _update_entity_summary(self, category: str) -> None:
+        if category in self.subject_summary_labels:
+            label = self.subject_summary_labels.get(category)
+        elif category == "api":
+            label = getattr(self, "api_info_label", None)
+        elif category == "product":
+            label = getattr(self, "product_info_label", None)
+        elif category == "maneuver":
+            label = self.subject_summary_labels.get("maneuver")
         else:
-            self.selected_entities[category] = None
+            label = None
+        if label is None:
+            return
+
+        entry = self.selected_entities.get(category)
+        if not isinstance(entry, Mapping):
+            label.setText("Select a configuration from the workspace or builtin catalog.")
+            return
+
+        source = entry.get("source", "workspace")
+        name = entry.get("name") or entry.get("ref") or entry.get("display_id") or "(unnamed)"
+        ref_value = entry.get("ref") or "—"
+        overrides = entry.get("overrides") or {}
+        override_keys = sorted(overrides.keys())
+        variability = entry.get("variability_overrides") or {}
+        variability_keys = sorted(variability.keys())
+
+        lines = [
+            f"Source: {source}",
+            f"Reference: {ref_value}",
+        ]
+
+        if override_keys:
+            lines.append(f"Overrides: {', '.join(override_keys)}")
+        else:
+            lines.append("Overrides: none")
+
+        if variability_keys:
+            lines.append(f"Variability: {', '.join(variability_keys)}")
+
+        if category == "product":
+            api_overrides = overrides.get("apis") if isinstance(overrides, Mapping) else None
+            if api_overrides:
+                if isinstance(api_overrides, Mapping):
+                    api_summary = ", ".join(sorted(str(key) for key in api_overrides.keys()))
+                elif isinstance(api_overrides, list):
+                    api_summary = ", ".join(
+                        str(item.get("name") or item.get("ref") or idx + 1)
+                        for idx, item in enumerate(api_overrides)
+                        if isinstance(item, Mapping)
+                    )
+                else:
+                    api_summary = str(api_overrides)
+                lines.append(f"APIs: {api_summary}")
+            elif ref_value and CATALOG_AVAILABLE and app_api is not None:
+                try:
+                    base_product = app_api.get_catalog_entry("product", ref_value)
+                except Exception:
+                    base_product = None
+                if base_product is not None:
+                    base_payload = {}
+                    try:
+                        base_payload = base_product.model_dump()
+                    except Exception:
+                        try:
+                            base_payload = dict(base_product)
+                        except Exception:
+                            base_payload = {}
+                    base_apis = base_payload.get("apis")
+                    if isinstance(base_apis, Mapping):
+                        api_summary = ", ".join(sorted(str(key) for key in base_apis.keys()))
+                        if api_summary:
+                            lines.append(f"Catalog APIs: {api_summary}")
+                    elif isinstance(base_apis, list):
+                        api_summary = ", ".join(
+                            str(item.get("name") or item.get("ref") or idx + 1)
+                            for idx, item in enumerate(base_apis)
+                            if isinstance(item, Mapping)
+                        )
+                        if api_summary:
+                            lines.append(f"Catalog APIs: {api_summary}")
+
+        label.setText("\n".join(lines))
+
+    def apply_config(
+        self,
+        config: Mapping[str, Any],
+        *,
+        run_plan: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        if not isinstance(config, Mapping):
+            return
+
+        run_section = config.get("run")
+        if isinstance(run_section, Mapping):
+            stages = run_section.get("stages")
+            stage_set = set()
+            if isinstance(stages, list):
+                stage_set = {str(stage) for stage in stages}
+            elif stages is not None:
+                stage_set = {str(stages)}
+
+            if stage_set:
+                if "iv_pk" in stage_set and "deposition" not in stage_set and "pbbm" not in stage_set and "gi_pk" not in stage_set:
+                    self._set_administration_ui("iv")
+                elif "deposition" in stage_set or "pbbm" in stage_set:
+                    self._set_administration_ui("inhalation")
+                elif "gi_pk" in stage_set:
+                    self._set_administration_ui("po")
+
+            for pipeline_stage, stage_key in self.stage_pipeline_lookup.items():
+                controls = self.stage_controls.get(stage_key)
+                if not controls:
+                    continue
+                checkbox: QCheckBox = controls["checkbox"]
+                checkbox.blockSignals(True)
+                checkbox.setChecked(pipeline_stage in stage_set)
+                checkbox.blockSignals(False)
+
+            stage_override_map = run_section.get("stage_overrides") if isinstance(run_section, Mapping) else {}
+            if isinstance(stage_override_map, Mapping):
+                for stage_key, payload in stage_override_map.items():
+                    controls = self.stage_controls.get(stage_key)
+                    if not controls:
+                        continue
+                    tabs: QTabWidget = controls["tabs"]
+                    manual_edit: QPlainTextEdit = controls["manual_edit"]
+                    model_combo: QComboBox = controls["model_combo"]
+                    param_widgets = controls.get("param_widgets", {})
+                    if isinstance(payload, Mapping):
+                        model_value = payload.get("model")
+                        params_payload = payload.get("params") if isinstance(payload.get("params"), Mapping) else None
+                        extra_keys = set(payload.keys()) - {"model", "params"}
+
+                        if extra_keys:
+                            manual_edit.setPlainText(json.dumps(payload, indent=2))
+                            tabs.setCurrentIndex(1)
+                        else:
+                            if model_value is not None:
+                                self._set_combo_value(model_combo, model_value)
+                            if params_payload:
+                                for name, value in params_payload.items():
+                                    widget = param_widgets.get(name)
+                                    if widget is None:
+                                        continue
+                                    if isinstance(widget, QDoubleSpinBox):
+                                        try:
+                                            widget.setValue(float(value))
+                                        except (TypeError, ValueError):
+                                            pass
+                                    elif isinstance(widget, QSpinBox):
+                                        try:
+                                            widget.setValue(int(value))
+                                        except (TypeError, ValueError):
+                                            pass
+                                    elif isinstance(widget, QComboBox):
+                                        idx = widget.findData(value)
+                                        if idx < 0:
+                                            idx = widget.findText(str(value))
+                                        if idx >= 0:
+                                            widget.setCurrentIndex(idx)
+                                    elif isinstance(widget, QLineEdit):
+                                        widget.setText(str(value))
+                            tabs.setCurrentIndex(0)
+                    else:
+                        try:
+                            manual_edit.setPlainText(json.dumps(payload, indent=2))
+                        except TypeError:
+                            manual_edit.setPlainText(str(payload))
+                        tabs.setCurrentIndex(1)
+
+            seed = run_section.get("seed")
+            if seed is not None:
+                try:
+                    self.seed_spin.setValue(int(seed))
+                except (TypeError, ValueError):
+                    pass
+
+        deposition = config.get("deposition")
+        if isinstance(deposition, Mapping):
+            combo = self.stage_controls.get("deposition", {}).get("model_combo")
+            if combo is not None:
+                self._set_combo_value(combo, deposition.get("model"))
+
+        pbbm = config.get("pbbm")
+        if isinstance(pbbm, Mapping):
+            combo = self.stage_controls.get("pbbm", {}).get("model_combo")
+            if combo is not None:
+                self._set_combo_value(combo, pbbm.get("model"))
+
+        pk = config.get("pk")
+        if isinstance(pk, Mapping):
+            combo = self.stage_controls.get("pk", {}).get("model_combo")
+            if combo is not None:
+                self._set_combo_value(combo, pk.get("model"))
+
+        gi_payload = config.get("gi_tract") or config.get("gi")
+        if isinstance(gi_payload, Mapping):
+            binding_id = bindings.get("gi") if isinstance(bindings, Mapping) else None
+            self._select_entity("gi", binding_id, gi_payload)
+
+        lung_payload = None
+        if isinstance(deposition, Mapping):
+            lung_geometry_ref = (
+                deposition.get("lung_geometry_ref")
+                or deposition.get("lung_geometry")
+                or deposition.get("geometry_ref")
+            )
+            lung_overrides = deposition.get("lung_geometry_overrides") or deposition.get("lung_geometry_override")
+            if lung_geometry_ref or lung_overrides:
+                lung_payload = {}
+                if lung_geometry_ref:
+                    lung_payload["ref"] = lung_geometry_ref
+                if isinstance(lung_overrides, Mapping) and lung_overrides:
+                    lung_payload["overrides"] = copy.deepcopy(lung_overrides)
+        if lung_payload:
+            binding_id = bindings.get("lung") if isinstance(bindings, Mapping) else None
+            self._select_entity("lung", binding_id, lung_payload)
+
+        study_section = config.get("study")
+        if isinstance(study_section, Mapping):
+            label = study_section.get("study_label") or study_section.get("name")
+            if label:
+                self.study_name_edit.setText(str(label))
+
+        bindings = {}
+        if run_plan is not None and isinstance(run_plan, Mapping):
+            bindings = run_plan.get("workspace_bindings") or {}
+
+        entity_payloads: Dict[str, Optional[Mapping[str, Any]]] = {
+            "subject": config.get("subject"),
+            "gi": gi_payload,
+            "lung": {"ref": lung_geometry_ref} if lung_geometry_ref else None,
+            "api": config.get("api"),
+            "product": config.get("product"),
+            "maneuver": config.get("maneuver"),
+        }
+
+        for category, payload in entity_payloads.items():
+            if payload is None:
+                continue
+            binding_id = None
+            if isinstance(bindings, Mapping):
+                binding_id = bindings.get(category)
+            self._select_entity(category, binding_id, payload)
+
+        if isinstance(bindings, Mapping):
+            for category, binding_id in bindings.items():
+                if category in entity_payloads:
+                    continue
+                if category in self.entity_combos:
+                    self._select_entity(category, binding_id, None)
+
+        if run_plan is not None:
+            try:
+                self._apply_run_plan_to_ui(run_plan)
+            except Exception:
+                pass
+            label_text = run_plan.get("run_label")
+            if label_text:
+                self.run_label_edit.setText(str(label_text))
+            config_name = run_plan.get("config_name")
+            if config_name:
+                self.study_name_edit.setText(str(config_name))
 
     def reload_workspace_catalog_entries(self) -> None:
+        categories = tuple(self.catalog_category_map.items())
+
         if self.workspace_manager is None:
             self.populate_catalog_defaults()
+            self._refresh_entity_combos()
             return
 
-        for category in ("subject", "api", "product", "maneuver"):
+        for category, catalog_name in categories:
             try:
-                entries = self.workspace_manager.list_catalog_entries(category)
+                raw_entries = self.workspace_manager.list_catalog_entries(catalog_name)
             except Exception as exc:
                 logger.warning(
                     "list catalog entries failed",
-                    category=category,
+                    category=catalog_name,
                     error=str(exc),
                 )
-                entries = []
-            self.saved_catalog_entries[category] = entries
-            select_id = entries[0].get("id") if entries else None
-            self._populate_combo_from_saved(category, entries, select_id=select_id)
+                raw_entries = []
 
-    def _entity_config_payload(self, category: str) -> Dict[str, Any]:
+            processed: List[Dict[str, Any]] = []
+            for entry in raw_entries or []:
+                if not isinstance(entry, Mapping):
+                    continue
+                prepared = copy.deepcopy(entry)
+                prepared["source"] = "workspace"
+                prepared.setdefault("ref", prepared.get("name"))
+                prepared.setdefault("display_id", prepared.get("id") or prepared.get("ref"))
+                processed.append(prepared)
+
+            self.workspace_catalog_entries[category] = processed
+
+        self._refresh_entity_combos()
+
+    def _refresh_entity_combos(self) -> None:
+        for category in self.catalog_category_map.keys():
+            combo = self.entity_combos.get(category)
+            if combo is None:
+                continue
+            combined: List[Dict[str, Any]] = []
+            for entry in self.workspace_catalog_entries.get(category, []):
+                combined.append(copy.deepcopy(entry))
+            for entry in self.builtin_catalog_entries.get(category, []):
+                combined.append(copy.deepcopy(entry))
+
+            self.all_catalog_entries[category] = combined
+
+            selected_entry = self.selected_entities.get(category)
+            target_id = self._entry_identifier(selected_entry) if isinstance(selected_entry, Mapping) else None
+            target_ref = selected_entry.get("ref") if isinstance(selected_entry, Mapping) else None
+
+            self._populate_combo_from_saved(
+                category,
+                combined,
+                select_id=target_id,
+                select_ref=target_ref,
+            )
+
+    def _entity_config_payload(self, category: str, *, required: bool = True) -> Dict[str, Any]:
         entry = self.selected_entities.get(category)
         label = self.entity_display.get(category, category)
         if not entry:
-            raise ValueError(
-                f"Select a {label} from its configuration tab before building the configuration."
-            )
+            if required:
+                raise ValueError(
+                    f"Select a {label} from its configuration tab before building the configuration."
+                )
+            return {}
 
         ref = entry.get("ref")
         if not ref:
-            raise ValueError(f"Saved {label} entry is missing a catalog reference.")
+            if required:
+                raise ValueError(f"Saved {label} entry is missing a catalog reference.")
+            return {}
 
         payload: Dict[str, Any] = {"ref": ref}
         overrides = entry.get("overrides") or {}
         if overrides:
-            payload["overrides"] = copy.deepcopy(overrides)
+            processed = copy.deepcopy(overrides)
+            if category == "product":
+                processed = self._normalise_product_overrides(ref, processed)
+            payload["overrides"] = processed
         return payload
+
+    def _normalise_product_overrides(self, base_ref: str, overrides: Dict[str, Any]) -> Dict[str, Any]:
+        result = copy.deepcopy(overrides)
+        api_entries = result.get("apis")
+        if not isinstance(api_entries, list):
+            return result
+
+        slot_names: List[str] = []
+        if base_ref and CATALOG_AVAILABLE and app_api is not None:
+            try:
+                base_product = app_api.get_catalog_entry("product", base_ref) or {}
+                base_apis = base_product.get("apis")
+                if isinstance(base_apis, dict):
+                    slot_names = list(base_apis.keys())
+                elif isinstance(base_apis, list):
+                    slot_names = [
+                        str(item.get("name") or item.get("ref"))
+                        for item in base_apis
+                        if isinstance(item, dict) and (item.get("name") or item.get("ref"))
+                    ]
+            except Exception:
+                slot_names = []
+
+        normalised_entries: Dict[str, Dict[str, Any]] = {}
+        for idx, entry in enumerate(api_entries):
+            if not isinstance(entry, dict):
+                continue
+            data = ProductAPIEditor._normalise_entry(entry)
+
+            slot_name = None
+            if slot_names and idx < len(slot_names):
+                slot_name = slot_names[idx]
+            slot_name = slot_name or entry.get("slot_name") or data.get("name") or entry.get("name") or entry.get("ref") or f"API_{idx + 1}"
+            slot_key = str(slot_name)
+
+            payload: Dict[str, Any] = {}
+
+            ref_value = entry.get("ref") or data.get("ref")
+            if ref_value:
+                payload["ref"] = str(ref_value)
+
+            dose_pg = data.get("dose_pg")
+            if dose_pg is not None:
+                try:
+                    payload["dose_pg"] = float(dose_pg)
+                except (TypeError, ValueError):
+                    pass
+
+            dose_ug = data.get("dose_ug")
+            if dose_ug is not None:
+                try:
+                    payload["dose_ug"] = float(dose_ug)
+                except (TypeError, ValueError):
+                    pass
+
+            for key in ("usp_depo_fraction", "mmad", "gsd"):
+                value = data.get(key)
+                if value is None:
+                    continue
+                try:
+                    payload[key] = float(value)
+                except (TypeError, ValueError):
+                    continue
+
+            if payload:
+                normalised_entries[slot_key] = payload
+
+        if normalised_entries:
+            result["apis"] = normalised_entries
+        return result
 
     def populate_catalog_defaults(self):
         """Populate reference selectors with catalog data when available."""
-        if self.workspace_manager is not None:
-            return
+        categories = tuple(self.catalog_category_map.keys())
 
         if not CATALOG_AVAILABLE or app_api is None:
-            for category in self.entity_combos.keys():
-                self._set_combo_placeholder(category)
+            for category in categories:
+                self.builtin_catalog_entries[category] = []
+            if self.workspace_manager is None:
+                for category in categories:
+                    combo = self.entity_combos.get(category)
+                    if combo is not None:
+                        self._set_combo_placeholder(category)
             return
 
         try:
-            for category in ("subject", "api", "product", "maneuver"):
-                refs = app_api.list_catalog_entries(category) or []
-                entries = [
-                    {
-                        "id": ref,
+            for category, catalog_name in self.catalog_category_map.items():
+                try:
+                    refs = app_api.list_catalog_entries(catalog_name) or []
+                except Exception:
+                    refs = []
+                builtin_entries: List[Dict[str, Any]] = []
+                for ref in refs:
+                    entry = {
+                        "id": f"builtin::{ref}",
                         "name": ref,
                         "ref": ref,
                         "overrides": {},
+                        "source": "builtin",
+                        "display_id": f"builtin::{ref}",
                     }
-                    for ref in refs
-                ]
-                self.saved_catalog_entries[category] = entries
-                self._populate_combo_from_saved(category, entries)
+                    builtin_entries.append(entry)
+                self.builtin_catalog_entries[category] = builtin_entries
         except Exception as exc:
-            print(f"Catalog population failed: {exc}")
+            logger.warning("Catalog population failed", error=str(exc))
+
+        if self.workspace_manager is None:
+            self._refresh_entity_combos()
 
     # --- Run type helpers ---------------------------------------------------
 
@@ -2015,7 +3946,7 @@ class StudyDesignerTab(QWidget):
             self.sweep_enabled.setChecked(is_sweep)
             self.sweep_enabled.setEnabled(is_sweep)
             self.sweep_enabled.blockSignals(False)
-            self.sweep_params_edit.setEnabled(is_sweep)
+            self._on_sweep_enabled_changed(is_sweep)
 
         if hasattr(self, "parameter_estimation_group"):
             self.parameter_estimation_group.setVisible(is_parameter_estimation)
@@ -2031,10 +3962,421 @@ class StudyDesignerTab(QWidget):
     def get_sweep_parameters(self) -> Dict[str, Any]:
         if self.current_run_type() != "sweep":
             return {}
-        sweep_text = self.sweep_params_edit.toPlainText().strip()
-        if not sweep_text:
+        rows = self.sweep_table.get_non_empty_rows() if hasattr(self, "sweep_table") else []
+        if not rows:
             return {}
-        return json.loads(sweep_text)
+
+        sweep_params: Dict[str, Any] = {}
+        for idx, row in enumerate(rows, start=1):
+            if not row:
+                continue
+            path = row[0].strip() if len(row) > 0 else ""
+            if not path:
+                raise ValueError(f"Sweep row {idx} is missing a parameter path")
+
+            values: List[Any] = []
+            sweep_expression: Optional[Dict[str, Any]] = None
+            for raw_value in row[1:]:
+                text = raw_value.strip() if raw_value is not None else ""
+                if not text:
+                    continue
+                try:
+                    parsed_expression = self._parse_sweep_expression(text)
+                except ValueError as exc:
+                    raise ValueError(f"Sweep row {idx}: {exc}") from exc
+
+                if parsed_expression is not None:
+                    if sweep_expression is not None or values:
+                        raise ValueError(
+                            f"Sweep row {idx} mixes expression syntax with explicit values; choose one style."
+                        )
+                    sweep_expression = parsed_expression
+                    continue
+
+                literal_value = self._coerce_literal(text)
+                values.append(literal_value)
+
+            if sweep_expression is not None:
+                sweep_params[path] = sweep_expression
+                continue
+
+            if not values:
+                raise ValueError(f"Provide at least one value for sweep parameter '{path}'")
+
+            if len(values) == 1 and isinstance(values[0], Mapping) and "@sweep" in values[0]:
+                sweep_params[path] = values[0]
+            else:
+                sweep_params[path] = values if len(values) > 1 else values[0]
+
+        return sweep_params
+
+    def _on_sweep_enabled_changed(self, enabled: bool) -> None:
+        if hasattr(self, "sweep_table"):
+            self.sweep_table.setEnabled(enabled)
+        if hasattr(self, "sweep_add_row_btn"):
+            self.sweep_add_row_btn.setEnabled(enabled)
+        if hasattr(self, "sweep_remove_row_btn"):
+            self.sweep_remove_row_btn.setEnabled(enabled)
+        if hasattr(self, "sweep_select_param_btn"):
+            self.sweep_select_param_btn.setEnabled(enabled)
+
+    def remove_selected_sweep_rows(self) -> None:
+        if not hasattr(self, "sweep_table"):
+            return
+        selection_model = self.sweep_table.selectionModel()
+        if selection_model is None:
+            return
+        selected_rows = {index.row() for index in selection_model.selectedRows()}
+        if not selected_rows:
+            selected_rows = {index.row() for index in selection_model.selectedIndexes()}
+        for row in sorted(selected_rows, reverse=True):
+            if 0 <= row < self.sweep_table.rowCount():
+                self.sweep_table.removeRow(row)
+        if self.sweep_table.rowCount() == 0:
+            self.sweep_table.add_empty_row()
+
+    def select_sweep_parameter(self) -> None:
+        if not hasattr(self, "sweep_table"):
+            return
+        row = self.sweep_table.currentRow()
+        if row < 0:
+            if self.sweep_table.rowCount() == 0:
+                row = self.sweep_table.add_empty_row()
+            else:
+                row = 0
+        if self.sweep_table.rowCount() == 0:
+            row = self.sweep_table.add_empty_row()
+        if self.sweep_table.item(row, 0) is None:
+            self.sweep_table.setItem(row, 0, QTableWidgetItem(""))
+        initial_path = self.sweep_table.item(row, 0).text() if self.sweep_table.item(row, 0) else ""
+        selected = self._open_parameter_picker_dialog(initial_path)
+        if selected:
+            self.sweep_table.item(row, 0).setText(selected)
+            self.sweep_table.setCurrentCell(row, 0)
+
+    def _choose_parameter_path(self, selector: "ParameterPathSelector") -> None:
+        selected = self._open_parameter_picker_dialog(selector.text())
+        if selected:
+            selector.setText(selected)
+
+    def _parameter_tree_source_config(
+        self,
+        *,
+        allow_manual_fallback: bool = True,
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        app_config: Optional[AppConfig] = None
+        config_dict: Optional[Dict[str, Any]] = None
+
+        if self.current_config:
+            config_dict = copy.deepcopy(self.current_config)
+            if CONFIG_MODEL_AVAILABLE and AppConfig is not None:
+                try:
+                    app_config = AppConfig.model_validate(config_dict)
+                except Exception as exc:  # pragma: no cover - validation diagnostics
+                    logger.debug("validate cached config failed", exc_info=exc)
+                    app_config = None
+
+        build_error: Optional[str] = None
+        if config_dict is None or app_config is None:
+            original_modes = self.stage_modes.copy()
+            try:
+                if allow_manual_fallback and any(mode == "manual" for mode in original_modes.values()):
+                    for key, mode in original_modes.items():
+                        if mode == "manual":
+                            self.stage_modes[key] = "model"
+
+                if CONFIG_MODEL_AVAILABLE and AppConfig is not None:
+                    app_config = self.build_app_config()
+                    config_dict = app_config.model_dump(mode="python")
+                else:
+                    config_dict = self.build_config()
+            except Exception as exc:
+                logger.debug("Parameter tree snapshot failed", exc_info=exc)
+                build_error = str(exc)
+                config_dict = None
+            finally:
+                self.stage_modes.clear()
+                self.stage_modes.update(original_modes)
+
+        if config_dict is None:
+            return None, build_error or "Unable to build configuration"
+
+        if app_config is None and CONFIG_MODEL_AVAILABLE and AppConfig is not None:
+            try:
+                app_config = AppConfig.model_validate(config_dict)
+            except Exception as exc:  # pragma: no cover
+                logger.debug("late AppConfig validation failed", exc_info=exc)
+                app_config = None
+
+        tree_config: Dict[str, Any] = copy.deepcopy(config_dict)
+
+        if app_api is not None:
+            try:
+                self._augment_tree_with_catalog_defaults(tree_config)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("augment catalog defaults failed", exc_info=exc)
+
+            if app_config is not None:
+                try:
+                    hydrated = app_api.hydrate_config(app_config)
+                except Exception as exc:  # pragma: no cover - hydration failures
+                    logger.debug("hydrate config failed", exc_info=exc)
+                else:
+                    resolved = tree_config.setdefault("_resolved_entities", {})
+                    for key, value in hydrated.items():
+                        if key == "config":
+                            continue
+                        resolved[key] = _to_plain_data(value)
+
+        self._inject_stage_placeholders_for_tree(tree_config)
+
+        return tree_config, None
+
+    def _open_parameter_picker_dialog(
+        self,
+        initial_path: str = "",
+        *,
+        allow_manual_fallback: bool = True,
+    ) -> Optional[str]:
+        config_dict, error_message = self._parameter_tree_source_config(
+            allow_manual_fallback=allow_manual_fallback
+        )
+        if not config_dict:
+            details = f"\n\nDetails: {error_message}" if error_message else ""
+            QMessageBox.warning(
+                self,
+                "Select Parameter",
+                "Unable to build configuration for parameter selection."
+                + details,
+            )
+            return None
+
+        dialog = ParameterPickerDialog(config_dict, self)
+        if initial_path:
+            dialog.preselect_path(initial_path)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            return dialog.selected_path
+        return None
+
+    @staticmethod
+    def _ensure_tree_path(root: Dict[str, Any], segments: Sequence[str]) -> Dict[str, Any]:
+        current = root
+        for segment in segments:
+            node = current.get(segment)
+            if not isinstance(node, dict):
+                node = {}
+                current[segment] = node
+            current = node
+        return current
+
+    def _augment_tree_with_catalog_defaults(self, tree_config: Dict[str, Any]) -> None:
+        if app_api is None:
+            return
+
+        entity_paths: Dict[str, Tuple[str, ...]] = {
+            "subject": ("subject", "overrides"),
+            "api": ("api", "overrides"),
+            "product": ("product", "overrides"),
+            "maneuver": ("maneuver", "overrides"),
+            "gi": ("gi_tract", "overrides"),
+            "lung": ("deposition", "lung_geometry_overrides"),
+        }
+
+        for category, path in entity_paths.items():
+            entry = self.selected_entities.get(category)
+            if not isinstance(entry, Mapping):
+                continue
+            ref = entry.get("ref") or entry.get("name")
+            if not ref:
+                continue
+
+            catalog_key = self.catalog_category_map.get(category, category)
+            if category == "lung":
+                catalog_key = "lung_geometry"
+            elif category == "gi":
+                catalog_key = "gi_tract"
+
+            try:
+                base_payload = app_api.get_catalog_entry(catalog_key, ref)
+            except Exception as exc:  # pragma: no cover - catalog issues
+                logger.debug(
+                    "load catalog entry failed",
+                    category=catalog_key,
+                    ref=ref,
+                    error=str(exc),
+                )
+                base_payload = None
+
+            if not isinstance(base_payload, Mapping):
+                continue
+
+            overrides = copy.deepcopy(entry.get("overrides") or {})
+            if overrides:
+                base_payload = _apply_overrides(base_payload, overrides)
+
+            target_parent = self._ensure_tree_path(tree_config, path[:-1])
+            target = target_parent.setdefault(path[-1], {})
+            if not isinstance(target, dict):
+                target_parent[path[-1]] = {}
+                target = target_parent[path[-1]]
+
+            for key, value in base_payload.items():
+                target.setdefault(str(key), _to_plain_data(value))
+
+    def _current_api_reference(self) -> Optional[str]:
+        entry = self.selected_entities.get("api")
+        if isinstance(entry, Mapping):
+            ref = entry.get("ref") or entry.get("name")
+            if ref:
+                return str(ref)
+
+        product_payload = self._resolve_active_product_payload()
+        if isinstance(product_payload, Mapping):
+            apis = product_payload.get("apis")
+            if isinstance(apis, Mapping):
+                for slot, payload in apis.items():
+                    if isinstance(payload, Mapping):
+                        ref = payload.get("ref") or slot
+                        if ref:
+                            return str(ref)
+                # fallback to first key if values are not dicts
+                for slot in apis.keys():
+                    if slot:
+                        return str(slot)
+        return None
+
+    def _inject_stage_placeholders_for_tree(self, tree_config: Dict[str, Any]) -> None:
+        run_section = tree_config.setdefault("run", {})
+        overrides_section = run_section.setdefault("stage_overrides", {})
+
+        # Pre-seed with product defaults where available
+        product_payload = self._resolve_active_product_payload()
+        api_ref = self._current_api_reference()
+        if Product is not None and isinstance(product_payload, Mapping):
+            try:
+                product_model = Product.model_validate(product_payload)
+            except Exception as exc:  # pragma: no cover - validation diagnostics
+                logger.debug("product validation failed for tree placeholders", exc_info=exc)
+            else:
+                route = self.current_administration()
+                stage_defaults = product_model.build_stage_overrides(route, api_name=api_ref)
+                for stage_key, payload in stage_defaults.items():
+                    stage_entry = overrides_section.setdefault(stage_key, {})
+                    for key, value in payload.items():
+                        if isinstance(value, Mapping):
+                            branch = stage_entry.setdefault(key, {})
+                            for sub_key, sub_value in value.items():
+                                branch.setdefault(str(sub_key), _to_plain_data(sub_value))
+                        else:
+                            stage_entry.setdefault(str(key), _to_plain_data(value))
+
+        for stage_key, controls in self.stage_controls.items():
+            stage_entry = overrides_section.setdefault(stage_key, {})
+
+            combo: Optional[QComboBox] = controls.get("model_combo")
+            if isinstance(combo, QComboBox):
+                model_value = combo.currentData() or combo.currentText()
+                if model_value:
+                    stage_entry.setdefault("model", model_value)
+
+            param_widgets = controls.get("param_widgets") or {}
+            if not param_widgets:
+                params_entry = stage_entry.setdefault("params", {})
+            else:
+                params_entry = stage_entry.setdefault("params", {})
+                for name in param_widgets.keys():
+                    params_entry.setdefault(str(name), None)
+
+            if stage_key in {"pk", "iv_pk", "gi_pk"}:
+                for placeholder in PK_PARAM_PLACEHOLDERS:
+                    params_entry.setdefault(placeholder, None)
+
+    def select_stage_manual_parameter(self, stage_key: str, table: SpreadsheetWidget) -> None:
+        controls = self.stage_controls.get(stage_key)
+        if controls is None:
+            return
+        checkbox = controls.get("checkbox")
+        if isinstance(checkbox, QCheckBox) and not checkbox.isChecked():
+            QMessageBox.information(
+                self,
+                "Stage Disabled",
+                "Enable the stage before selecting manual override parameters.",
+            )
+            return
+
+        if table.rowCount() == 0:
+            table.add_empty_row()
+        row = table.currentRow()
+        if row < 0:
+            row = 0
+
+        if table.item(row, 0) is None:
+            table.setItem(row, 0, QTableWidgetItem(""))
+
+        initial_path = table.item(row, 0).text().strip()
+        selected = self._open_parameter_picker_dialog(initial_path, allow_manual_fallback=True)
+        if not selected:
+            return
+
+        table.item(row, 0).setText(selected)
+
+        if table.columnCount() < 2:
+            table._ensure_column_count(2)
+        if table.item(row, 1) is None:
+            table.setItem(row, 1, QTableWidgetItem(""))
+        table.setCurrentCell(row, 1)
+
+    def _clear_stage_manual_payload(self, stage_key: str) -> None:
+        controls = self.stage_controls.get(stage_key)
+        if controls is not None:
+            controls["manual_loaded_payload"] = None
+
+    def load_stage_manual_json(self, stage_key: str, table: SpreadsheetWidget) -> None:
+        try:
+            start_dir = str(self.workspace_manager.workspace_path) if self.workspace_manager is not None else str(Path.cwd())
+        except Exception:
+            start_dir = str(Path.cwd())
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Stage Overrides",
+            start_dir,
+            "JSON files (*.json);;All files (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except Exception as exc:
+            QMessageBox.warning(self, "Load JSON", f"Failed to load overrides: {exc}")
+            return
+
+        controls = self.stage_controls.get(stage_key)
+        if controls is None:
+            return
+        controls["manual_loaded_payload"] = payload
+
+        if isinstance(payload, Mapping):
+            rows = []
+            for key, value in payload.items():
+                if isinstance(value, (dict, list)):
+                    value_text = json.dumps(value)
+                else:
+                    value_text = str(value)
+                rows.append([str(key), value_text])
+            if rows:
+                table.set_data(rows)
+                table.add_empty_row()
+            else:
+                table.clear_rows()
+        else:
+            QMessageBox.information(
+                self,
+                "Load JSON",
+                "Loaded JSON is not an object; it will be used as-is when the configuration is built.",
+            )
 
     def browse_observed_dataset(self):
         if self.workspace_manager is not None:
@@ -2049,6 +4391,48 @@ class StudyDesignerTab(QWidget):
         )
         if file_path:
             self.observed_path_edit.setText(file_path)
+
+    def clear_observed_series(self) -> None:
+        if hasattr(self, "observed_series_table"):
+            self.observed_series_table.clear_rows()
+
+    def load_observed_series(self) -> None:
+        if not hasattr(self, "observed_series_table"):
+            return
+
+        time_column = self.observed_time_col_edit.text().strip() or "time"
+        value_column = self.observed_value_col_edit.text().strip() or "value"
+
+        if self.workspace_manager is not None:
+            start_dir = str(self.workspace_manager.workspace_path)
+        else:
+            start_dir = str(Path.cwd())
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Observed Series",
+            start_dir,
+            "CSV files (*.csv *.tsv);;All files (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            df = pd.read_csv(file_path)
+        except Exception as exc:
+            raise ValueError(f"Failed to load observed series: {exc}") from exc
+
+        if time_column not in df.columns or value_column not in df.columns:
+            columns = ", ".join(df.columns)
+            raise ValueError(
+                f"Columns '{time_column}' or '{value_column}' not found in observed series file. Available: {columns}"
+            )
+
+        times = df[time_column].tolist()
+        values = df[value_column].tolist()
+        rows = [[str(t), str(v)] for t, v in zip(times, values)]
+        self.observed_series_table.set_data(rows)
+        self.observed_path_edit.setText(file_path)
 
     def add_parameter_row(
         self,
@@ -2065,9 +4449,8 @@ class StudyDesignerTab(QWidget):
         name_edit = QLineEdit(name)
         self.parameter_table.setCellWidget(row, 0, name_edit)
 
-        path_edit = QLineEdit(path)
-        path_edit.setPlaceholderText("e.g. pk.params.clearance_L_h")
-        self.parameter_table.setCellWidget(row, 1, path_edit)
+        path_selector = ParameterPathSelector(path, picker=self._choose_parameter_path)
+        self.parameter_table.setCellWidget(row, 1, path_selector)
 
         mode_combo = QComboBox()
         mode_combo.addItem("Relative", userData="relative")
@@ -2118,11 +4501,18 @@ class StudyDesignerTab(QWidget):
 
         if run_type == "sweep":
             params = run_plan.get("sweep_parameters") or {}
-            try:
-                self.sweep_params_edit.setPlainText(json.dumps(params, indent=2))
-                self.sweep_enabled.setChecked(bool(params))
-            except Exception:
-                pass
+            rows: List[List[str]] = []
+            for path_value, sweep_values in params.items():
+                values = sweep_values if isinstance(sweep_values, (list, tuple)) else [sweep_values]
+                row = [str(path_value)] + [str(v) for v in values]
+                rows.append(row)
+            if hasattr(self, "sweep_table"):
+                if rows:
+                    self.sweep_table.set_data(rows)
+                else:
+                    self.sweep_table.clear_rows()
+            self.sweep_enabled.setChecked(bool(rows))
+            self._on_sweep_enabled_changed(bool(rows))
         elif run_type == "parameter_estimation":
             estimation_plan = run_plan.get("estimation") or {}
             self._load_parameter_estimation_plan(estimation_plan)
@@ -2197,7 +4587,7 @@ class StudyDesignerTab(QWidget):
         self.observed_time_col_edit.setText("time_h")
         self.observed_value_col_edit.setText("conc_ng_ml")
         self.observed_time_unit_combo.setCurrentIndex(self.observed_time_unit_combo.findData("h"))
-        self.observed_manual_data_edit.clear()
+        self.clear_observed_series()
         self.timeseries_weight_spin.setValue(1.0)
         self.target_metric_combo.setCurrentIndex(0)
 
@@ -2240,9 +4630,12 @@ class StudyDesignerTab(QWidget):
                 series = observed.get("series")
                 if series:
                     try:
-                        self.observed_manual_data_edit.setPlainText(json.dumps(series, indent=2))
+                        series_dict = self._normalise_observed_payload(series)
+                        rows = [[str(t), str(v)] for t, v in zip(series_dict.get("time_s", []), series_dict.get("values", []))]
+                        if rows:
+                            self.observed_series_table.set_data(rows)
                     except Exception:
-                        self.observed_manual_data_edit.setPlainText("")
+                        self.clear_observed_series()
                 self.timeseries_weight_spin.setValue(weight)
                 loss = entry.get("loss")
                 if loss is not None:
@@ -2306,6 +4699,204 @@ class StudyDesignerTab(QWidget):
             return float(text)
         except ValueError as exc:
             raise ValueError(f"Could not parse numeric value '{text}'") from exc
+
+    @staticmethod
+    def _parse_sweep_expression(text: str) -> Optional[Dict[str, Any]]:
+        stripped = text.strip()
+        if not stripped:
+            return None
+
+        match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)$", stripped)
+        if not match:
+            return None
+
+        func_name = match.group(1).lower()
+        arg_body = match.group(2).strip()
+
+        args: List[str] = []
+        if arg_body:
+            buffer: List[str] = []
+            depth = 0
+            for char in arg_body:
+                if char == ',' and depth == 0:
+                    argument = ''.join(buffer).strip()
+                    if argument:
+                        args.append(argument)
+                    buffer = []
+                    continue
+                if char in '([{':
+                    depth += 1
+                elif char in ')]}':
+                    depth = max(0, depth - 1)
+                buffer.append(char)
+            argument = ''.join(buffer).strip()
+            if argument:
+                args.append(argument)
+
+        def _parse_literal(arg: str) -> Any:
+            lowered = arg.lower()
+            if lowered in {"none", "null"}:
+                return None
+            if lowered == "true":
+                return True
+            if lowered == "false":
+                return False
+            try:
+                if any(ch in arg for ch in (".", "e", "E")):
+                    return float(arg)
+                return int(arg)
+            except ValueError:
+                return arg
+
+        parsed_args = [_parse_literal(arg) for arg in args]
+
+        def _require_length(expected: Sequence[int]) -> None:
+            if len(parsed_args) not in expected:
+                if len(expected) == 1:
+                    raise ValueError(
+                        f"Expression '{stripped}' expects {expected[0]} argument(s); received {len(parsed_args)}"
+                    )
+                expected_str = ", ".join(str(num) for num in expected)
+                raise ValueError(
+                    f"Expression '{stripped}' expects {expected_str} argument(s); received {len(parsed_args)}"
+                )
+
+        spec: Dict[str, Any]
+
+        if func_name == "range":
+            _require_length({2, 3})
+            start = float(parsed_args[0])
+            stop = float(parsed_args[1])
+            step = float(parsed_args[2]) if len(parsed_args) == 3 else 1.0
+            if step == 0:
+                raise ValueError("Range step must be non-zero")
+            spec = {
+                "@sweep": {
+                    "type": "range",
+                    "start": start,
+                    "stop": stop,
+                    "step": step,
+                }
+            }
+            return spec
+
+        if func_name == "linspace":
+            _require_length({3, 4})
+            start = float(parsed_args[0])
+            stop = float(parsed_args[1])
+            count = int(parsed_args[2])
+            if count <= 0:
+                raise ValueError("linspace requires a positive sample count")
+            endpoint = True if len(parsed_args) == 3 else bool(parsed_args[3])
+            spec = {
+                "@sweep": {
+                    "type": "linspace",
+                    "start": start,
+                    "stop": stop,
+                    "count": count,
+                    "endpoint": endpoint,
+                }
+            }
+            return spec
+
+        if func_name == "logspace":
+            _require_length({3, 4})
+            start = float(parsed_args[0])
+            stop = float(parsed_args[1])
+            count = int(parsed_args[2])
+            if count <= 0:
+                raise ValueError("logspace requires a positive sample count")
+            base = float(parsed_args[3]) if len(parsed_args) == 4 else 10.0
+            spec = {
+                "@sweep": {
+                    "type": "logspace",
+                    "start": start,
+                    "stop": stop,
+                    "count": count,
+                    "base": base,
+                }
+            }
+            return spec
+
+        if func_name in {"normal", "lognormal"}:
+            _require_length({2, 3})
+            mean = float(parsed_args[0])
+            sigma = float(parsed_args[1])
+            samples = int(parsed_args[2]) if len(parsed_args) == 3 else None
+            if samples is not None and samples <= 0:
+                raise ValueError(f"{func_name} requires samples > 0 when specified")
+            payload = {
+                "type": func_name,
+                "mean": mean,
+                "sigma": sigma,
+            }
+            if samples is not None:
+                payload["samples"] = samples
+            return {"@sweep": payload}
+
+        if func_name == "uniform":
+            _require_length({2, 3})
+            low = float(parsed_args[0])
+            high = float(parsed_args[1])
+            if high <= low:
+                raise ValueError("uniform requires high > low")
+            samples = int(parsed_args[2]) if len(parsed_args) == 3 else None
+            if samples is not None and samples <= 0:
+                raise ValueError("uniform requires samples > 0 when specified")
+            payload = {
+                "type": "uniform",
+                "low": low,
+                "high": high,
+            }
+            if samples is not None:
+                payload["samples"] = samples
+            return {"@sweep": payload}
+
+        if func_name == "triangular":
+            _require_length({3, 4})
+            left = float(parsed_args[0])
+            mode = float(parsed_args[1])
+            right = float(parsed_args[2])
+            if not (left <= mode <= right):
+                raise ValueError("triangular requires left <= mode <= right")
+            samples = int(parsed_args[3]) if len(parsed_args) == 4 else None
+            if samples is not None and samples <= 0:
+                raise ValueError("triangular requires samples > 0 when specified")
+            payload = {
+                "type": "triangular",
+                "left": left,
+                "mode": mode,
+                "right": right,
+            }
+            if samples is not None:
+                payload["samples"] = samples
+            return {"@sweep": payload}
+
+        return None
+
+    @staticmethod
+    def _coerce_literal(text: str) -> Any:
+        stripped = text.strip()
+        if not stripped:
+            return ""
+        lowered = stripped.lower()
+        if lowered in {"none", "null"}:
+            return None
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+        if stripped.startswith(("[", "{", """)) and stripped.endswith(("]", "}", """)):
+            try:
+                return json.loads(stripped)
+            except Exception:
+                pass
+        try:
+            if any(ch in stripped for ch in (".", "e", "E")):
+                return float(stripped)
+            return int(stripped)
+        except ValueError:
+            return stripped
 
     @staticmethod
     def _normalise_observed_payload(payload: Any) -> Dict[str, List[float]]:
@@ -2403,10 +4994,15 @@ class StudyDesignerTab(QWidget):
             lower_widget = self.parameter_table.cellWidget(row, 4)
             upper_widget = self.parameter_table.cellWidget(row, 5)
 
-            if not isinstance(path_widget, QLineEdit) or not isinstance(step_widget, QDoubleSpinBox):
+            if not isinstance(step_widget, QDoubleSpinBox):
                 continue
 
-            path_value = path_widget.text().strip()
+            if isinstance(path_widget, ParameterPathSelector):
+                path_value = path_widget.text().strip()
+            elif isinstance(path_widget, QLineEdit):
+                path_value = path_widget.text().strip()
+            else:
+                continue
             if not path_value:
                 raise ValueError("Parameter rows must include a config path")
 
@@ -2455,14 +5051,25 @@ class StudyDesignerTab(QWidget):
         targets: List[Dict[str, Any]] = []
 
         observed_csv = self.observed_path_edit.text().strip()
-        manual_text = self.observed_manual_data_edit.toPlainText().strip()
         manual_series = None
-        if manual_text:
-            try:
-                manual_payload = json.loads(manual_text)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"Observed series JSON invalid: {exc}") from exc
-            manual_series = self._normalise_observed_payload(manual_payload)
+        if hasattr(self, "observed_series_table"):
+            series_rows = self.observed_series_table.get_non_empty_rows()
+            if series_rows:
+                times: List[float] = []
+                values: List[float] = []
+                for idx, row in enumerate(series_rows, start=1):
+                    if len(row) < 2:
+                        raise ValueError(f"Observed series row {idx} must include time and value")
+                    time_text, value_text = row[0], row[1]
+                    if not time_text or not value_text:
+                        raise ValueError(f"Observed series row {idx} must include time and value")
+                    try:
+                        times.append(float(time_text))
+                        values.append(float(value_text))
+                    except ValueError as exc:
+                        raise ValueError(f"Observed series row {idx} contains non-numeric data: {exc}") from exc
+                if times and values:
+                    manual_series = {"time_s": times, "values": values}
 
         if observed_csv or manual_series is not None:
             observed_spec: Dict[str, Any] = {
@@ -2587,6 +5194,19 @@ class StudyDesignerTab(QWidget):
             "config_name": self.current_config_name(),
         }
 
+        active_stages: List[str] = []
+        for definition in self.stage_definitions:
+            controls = self.stage_controls.get(definition["key"])
+            if not controls:
+                continue
+            if not controls["container"].isVisible():
+                continue
+            checkbox: QCheckBox = controls["checkbox"]
+            if checkbox.isChecked():
+                active_stages.append(definition["pipeline_stage"])
+        if active_stages:
+            plan["stages"] = active_stages
+
         if plan["run_type"] == "sweep":
             plan["sweep_parameters"] = self.get_sweep_parameters() if self.sweep_enabled.isChecked() else {}
         elif plan["run_type"] == "parameter_estimation":
@@ -2596,40 +5216,188 @@ class StudyDesignerTab(QWidget):
         elif plan["run_type"] == "virtual_bioequivalence":
             plan["virtual_bioequivalence"] = self.build_virtual_bioequivalence_plan()
 
+        bindings = self._collect_workspace_bindings()
+        if bindings:
+            plan["workspace_bindings"] = bindings
+
         return plan
 
     def set_workspace_manager(self, workspace_manager: Optional[WorkspaceManager]):
         """Assign workspace manager for saving configurations."""
         self.workspace_manager = workspace_manager
+        self.populate_catalog_defaults()
         self.reload_workspace_catalog_entries()
 
     def build_config(self) -> Dict[str, Any]:
         """Build configuration dictionary from form inputs."""
+        admin = self.current_administration()
+        stages: List[str] = []
+        stage_overrides_payload: Dict[str, Dict[str, Any]] = {}
+        for definition in self.stage_definitions:
+            controls = self.stage_controls.get(definition["key"])
+            if not controls:
+                continue
+            if not controls["container"].isVisible():
+                continue
+            checkbox: QCheckBox = controls["checkbox"]
+            if not checkbox.isChecked():
+                continue
+
+            stages.append(definition["pipeline_stage"])
+            mode = self.stage_modes.get(definition["key"], "model")
+            if mode == "manual":
+                editor_type = controls.get("manual_widget_type", "text")
+                manual_payload = None
+                if editor_type == "table":
+                    table_widget = controls.get("manual_edit")
+                    rows = table_widget.get_non_empty_rows() if isinstance(table_widget, SpreadsheetWidget) else []
+                    if rows:
+                        payload_dict: Dict[str, Any] = {}
+                        for idx, row in enumerate(rows, start=1):
+                            key = row[0].strip() if row else ""
+                            if not key:
+                                raise ValueError(f"Manual row {idx} for {definition['label']} is missing a field name")
+                            value_text = row[1] if len(row) > 1 else ""
+                            payload_dict[key] = self._coerce_literal(value_text)
+                        manual_payload = payload_dict
+                        controls["manual_loaded_payload"] = None
+                    else:
+                        manual_payload = controls.get("manual_loaded_payload")
+                        if manual_payload is None:
+                            raise ValueError(f"Provide manual data for {definition['label']} or switch to model mode.")
+                else:
+                    manual_widget = controls.get("manual_edit")
+                    manual_text = manual_widget.toPlainText().strip() if isinstance(manual_widget, QPlainTextEdit) else ""
+                    if not manual_text:
+                        raise ValueError(f"Provide manual data for {definition['label']} or switch to model mode.")
+                    try:
+                        manual_payload = json.loads(manual_text)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(f"Manual data for {definition['label']} must be valid JSON: {exc}") from exc
+                    if not isinstance(manual_payload, Mapping):
+                        raise ValueError(f"Manual data for {definition['label']} must be a JSON object")
+
+                stage_overrides_payload[definition["key"]] = dict(manual_payload)
+            else:
+                model_value = self._stage_model_value(
+                    definition["key"],
+                    default=(definition.get("families") or ["default"])[0],
+                )
+                stage_payload: Dict[str, Any] = {"model": model_value}
+                params_payload: Dict[str, Any] = {}
+                for name, widget in controls.get("param_widgets", {}).items():
+                    if isinstance(widget, QDoubleSpinBox):
+                        params_payload[name] = float(widget.value())
+                    elif isinstance(widget, QSpinBox):
+                        params_payload[name] = int(widget.value())
+                    elif isinstance(widget, QComboBox):
+                        value = widget.currentData()
+                        if value is None:
+                            value = widget.currentText()
+                        params_payload[name] = value
+                    elif isinstance(widget, QLineEdit):
+                        text = widget.text().strip()
+                        if text:
+                            params_payload[name] = text
+                if params_payload:
+                    stage_payload["params"] = params_payload
+                stage_overrides_payload[definition["key"]] = stage_payload
+
+        if "pk" in stages and "pbbm" not in stages:
+            stages = [stage for stage in stages if stage != "pk"]
+            stage_overrides_payload.pop("pk", None)
+
+        if not stages:
+            raise ValueError("Select at least one simulation stage for the chosen administration route.")
+
         config = {
             "run": {
-                "stages": [s.strip() for s in self.stages_edit.text().split(",")],
+                "stages": stages,
                 "seed": self.seed_spin.value(),
                 "threads": 1,
                 "enable_numba": False,
                 "artifact_dir": "results"
             },
             "deposition": {
-                "model": self.deposition_model_combo.currentText(),
+                "model": self._stage_model_value("deposition", default="clean_lung"),
                 "particle_grid": "medium"
             },
             "pbbm": {
-                "model": self.pbbm_model_combo.currentText(),
+                "model": self._stage_model_value("pbbm", default="numba"),
                 "epi_layers": [2, 2, 1, 1]
             },
             "pk": {
-                "model": self.pk_model_combo.currentText()
+                "model": self._stage_model_value("pk", default="pk_3c")
             }
         }
 
-        config["subject"] = self._entity_config_payload("subject")
-        config["api"] = self._entity_config_payload("api")
-        config["product"] = self._entity_config_payload("product")
-        config["maneuver"] = self._entity_config_payload("maneuver")
+        subject_payload = self._build_entity_payload("subject", required=True, allow_manual=True)
+        if not subject_payload:
+            raise ValueError("Select subject demographics before building the configuration.")
+        config["subject"] = subject_payload
+
+        api_payload = self._build_entity_payload("api", required=True, allow_manual=True)
+        if not api_payload:
+            raise ValueError("Select an API configuration or provide manual API data.")
+        config["api"] = api_payload
+
+        api_overrides: Dict[str, Any] = {}
+        if isinstance(api_payload, Mapping):
+            api_overrides = api_payload.get("overrides") or {}
+        if api_overrides and isinstance(subject_payload, Mapping):
+            subject_overrides = subject_payload.get("overrides")
+            if isinstance(subject_overrides, Mapping):
+                subject_pk_overrides = subject_overrides.get("pk")
+                if isinstance(subject_pk_overrides, dict):
+                    for param_key in PK_PARAM_PLACEHOLDERS:
+                        if param_key in api_overrides and param_key not in subject_pk_overrides:
+                            subject_pk_overrides[param_key] = api_overrides[param_key]
+
+        product_payload = self._build_entity_payload("product", required=True, allow_manual=True)
+        if not product_payload:
+            raise ValueError("Select a product configuration or provide manual product data.")
+        config["product"] = product_payload
+
+        if admin == "inhalation":
+            maneuver_payload = self._build_entity_payload("maneuver", required=True, allow_manual=True)
+            if not maneuver_payload:
+                raise ValueError("Select an inhalation maneuver before building the configuration.")
+            config["maneuver"] = maneuver_payload
+        else:
+            maneuver_payload = self._build_entity_payload("maneuver", required=False, allow_manual=True)
+            if maneuver_payload:
+                config["maneuver"] = maneuver_payload
+
+        gi_payload = self._build_entity_payload("gi", required=False, allow_manual=True)
+        if gi_payload:
+            config["gi_tract"] = gi_payload
+
+        lung_payload = self._build_entity_payload("lung", required=False, allow_manual=True)
+        if lung_payload:
+            lung_ref = lung_payload.get("ref")
+            if lung_ref:
+                config.setdefault("deposition", {})["lung_geometry_ref"] = lung_ref
+            overrides = copy.deepcopy(lung_payload.get("overrides") or {})
+            if overrides:
+                config.setdefault("deposition", {})["lung_geometry_overrides"] = overrides
+
+        for key in ("deposition", "pbbm", "pk"):
+            manual_payload = stage_overrides_payload.pop(key, None)
+            if manual_payload:
+                base_payload = config.get(key, {})
+                if base_payload:
+                    config[key] = _apply_overrides(base_payload, manual_payload)
+                else:
+                    config[key] = copy.deepcopy(manual_payload)
+
+        if stage_overrides_payload:
+            filtered_stage_overrides = {
+                key: value
+                for key, value in stage_overrides_payload.items()
+                if key not in {"deposition", "pbbm", "pk"}
+            }
+            if filtered_stage_overrides:
+                config.setdefault("run", {})["stage_overrides"] = filtered_stage_overrides
 
         return config
 
@@ -2763,7 +5531,15 @@ class StudyDesignerTab(QWidget):
 
     def update_from_catalog(self, category: str, data: Dict[str, Any]):
         """Update local catalog selection based on saved entry."""
-        if category not in self.saved_catalog_entries:
+        internal_category = category
+        if internal_category not in self.workspace_catalog_entries:
+            for local_key, catalog_name in self.catalog_category_map.items():
+                if catalog_name == category:
+                    internal_category = local_key
+                    break
+
+        category = internal_category
+        if category not in self.workspace_catalog_entries:
             return
 
         entry_id = data.get("id") or data.get("ref")
@@ -2775,14 +5551,14 @@ class StudyDesignerTab(QWidget):
             )
             return
 
-        entries = self.saved_catalog_entries.get(category, [])
+        entries = self.workspace_catalog_entries.get(category, [])
         if data.get("deleted"):
             entries = [
                 entry for entry in entries
                 if self._entry_identifier(entry) != entry_id
             ]
-            self.saved_catalog_entries[category] = entries
-            self._populate_combo_from_saved(category, entries)
+            self.workspace_catalog_entries[category] = entries
+            self._refresh_entity_combos()
             friendly = self.entity_display.get(category, category)
             display_name = data.get("name") or data.get("ref") or entry_id
             QMessageBox.information(
@@ -2792,18 +5568,24 @@ class StudyDesignerTab(QWidget):
             )
             return
 
-        entries = self.saved_catalog_entries.get(category, [])
+        entries = self.workspace_catalog_entries.get(category, [])
         replaced = False
         for idx, entry in enumerate(entries):
             if self._entry_identifier(entry) == entry_id:
-                entries[idx] = data
+                updated = copy.deepcopy(data)
+                updated["source"] = "workspace"
+                updated.setdefault("display_id", updated.get("id") or updated.get("ref"))
+                entries[idx] = updated
                 replaced = True
                 break
         if not replaced:
-            entries.append(data)
-        self.saved_catalog_entries[category] = entries
+            new_entry = copy.deepcopy(data)
+            new_entry["source"] = "workspace"
+            new_entry.setdefault("display_id", new_entry.get("id") or new_entry.get("ref"))
+            entries.append(new_entry)
+        self.workspace_catalog_entries[category] = entries
 
-        self._populate_combo_from_saved(category, entries, select_id=entry_id)
+        self._refresh_entity_combos()
 
         display_name = data.get("name") or data.get("ref") or entry_id
         friendly = self.entity_display.get(category, category)
@@ -2819,6 +5601,7 @@ class RunQueueTab(QWidget):
         super().__init__()
         self.workspace_manager: Optional[WorkspaceManager] = None
         self.process_manager: Optional[ProcessManager] = None
+        self.main_window: Optional['LMPMainWindow'] = None
         self.selected_config_path: Optional[str] = None
         self.run_rows: Dict[str, int] = {}
         self.run_errors: Dict[str, str] = {}
@@ -2827,6 +5610,8 @@ class RunQueueTab(QWidget):
         self.pending_run_plan: Optional[Dict[str, Any]] = None
         self.last_started_run_ids: List[str] = []
         self.saved_config_info: Dict[str, Dict[str, Any]] = {}
+        self._last_config_data: Optional[Dict[str, Any]] = None
+        self._last_config_metadata: Optional[Dict[str, Any]] = None
         self.init_ui()
 
     @staticmethod
@@ -2863,6 +5648,16 @@ class RunQueueTab(QWidget):
         self.config_combo.addItem("Select saved config...", None)
         self.config_combo.currentIndexChanged.connect(self.on_saved_config_selected)
 
+        self.apply_to_gui_btn = QPushButton("Apply to Designer")
+        self.apply_to_gui_btn.setEnabled(False)
+        self.apply_to_gui_btn.clicked.connect(self.apply_selected_to_gui)
+
+        self.parallel_label = QLabel("Parallel slots:")
+        self.parallel_spin = QSpinBox()
+        self.parallel_spin.setRange(1, 64)
+        self.parallel_spin.setValue(4)
+        self.parallel_spin.valueChanged.connect(self.on_parallel_changed)
+
         start_run_btn = QPushButton("Start Run")
         start_run_btn.clicked.connect(self.start_run)
 
@@ -2871,6 +5666,9 @@ class RunQueueTab(QWidget):
 
         controls_layout.addWidget(load_config_btn)
         controls_layout.addWidget(self.config_combo)
+        controls_layout.addWidget(self.apply_to_gui_btn)
+        controls_layout.addWidget(self.parallel_label)
+        controls_layout.addWidget(self.parallel_spin)
         controls_layout.addWidget(start_run_btn)
         controls_layout.addWidget(clear_queue_btn)
         controls_layout.addStretch()
@@ -2909,6 +5707,17 @@ class RunQueueTab(QWidget):
         config_actions.addStretch()
         configs_container.addLayout(config_actions)
         layout.addLayout(configs_container)
+
+        preview_group = QGroupBox("Configuration Preview")
+        preview_layout = QVBoxLayout()
+        self.config_preview = QPlainTextEdit()
+        self.config_preview.setReadOnly(True)
+        self.config_preview.setPlaceholderText(
+            "Select or load a configuration to preview it. Use 'Apply to Designer' when you want to overwrite the Study Designer tabs."
+        )
+        preview_layout.addWidget(self.config_preview)
+        preview_group.setLayout(preview_layout)
+        layout.addWidget(preview_group)
 
         self.run_table = QTableWidget()
         self.run_table.setColumnCount(7)
@@ -2967,10 +5776,23 @@ class RunQueueTab(QWidget):
                 self.process_manager.process_metric.disconnect(self.on_process_metric)
                 self.process_manager.process_finished.disconnect(self.on_process_finished)
                 self.process_manager.process_log.disconnect(self.on_process_log)
+                self.process_manager.process_queued.disconnect(self.on_process_queued)
+                self.process_manager.queue_positions_updated.disconnect(self.on_queue_positions_updated)
             except TypeError:
                 pass
 
         self.process_manager = process_manager
+
+        if hasattr(self, 'parallel_spin') and isinstance(self.parallel_spin, QSpinBox):
+            self.parallel_spin.blockSignals(True)
+            if process_manager is None:
+                self.parallel_spin.setValue(1)
+                self.parallel_spin.setEnabled(False)
+            else:
+                self.parallel_spin.setValue(process_manager.max_parallel_processes)
+                self.parallel_spin.setEnabled(True)
+            self.parallel_spin.blockSignals(False)
+
         if process_manager is None:
             return
 
@@ -2980,6 +5802,11 @@ class RunQueueTab(QWidget):
         process_manager.process_metric.connect(self.on_process_metric)
         process_manager.process_finished.connect(self.on_process_finished)
         process_manager.process_log.connect(self.on_process_log)
+        process_manager.process_queued.connect(self.on_process_queued)
+        process_manager.queue_positions_updated.connect(self.on_queue_positions_updated)
+
+    def set_main_window(self, main_window: Optional['LMPMainWindow']) -> None:
+        self.main_window = main_window
 
     def load_config(self):
         """Load configuration file."""
@@ -2991,12 +5818,18 @@ class RunQueueTab(QWidget):
             "JSON files (*.json);;TOML files (*.toml)"
         )
         if file_path:
-            self.set_selected_config(file_path)
+            self.set_selected_config(file_path, apply_to_ui=False)
 
     def _default_run_plan(self) -> Dict[str, Any]:
         return {"run_type": "single", "run_label": None}
 
-    def set_selected_config(self, config_path: Optional[str], run_plan: Optional[Dict[str, Any]] = None):
+    def set_selected_config(
+        self,
+        config_path: Optional[str],
+        run_plan: Optional[Dict[str, Any]] = None,
+        *,
+        apply_to_ui: bool = True,
+    ) -> None:
         """Set the selected configuration path for runs."""
         if not config_path:
             self.selected_config_path = None
@@ -3011,6 +5844,10 @@ class RunQueueTab(QWidget):
                 self.config_table.clearSelection()
                 self.config_table.blockSignals(False)
             self.pending_run_plan = None if run_plan is None else run_plan
+            self._last_config_data = None
+            self._update_config_preview(None, None)
+            if hasattr(self, 'apply_to_gui_btn'):
+                self.apply_to_gui_btn.setEnabled(False)
             return
 
         path_obj = Path(config_path)
@@ -3039,6 +5876,7 @@ class RunQueueTab(QWidget):
             self.config_table.blockSignals(False)
 
         detected_run_plan = run_plan
+        config_name_hint: Optional[str] = None
         if detected_run_plan is None:
             try:
                 with open(path_obj, "r") as handle:
@@ -3046,9 +5884,30 @@ class RunQueueTab(QWidget):
                 if isinstance(payload, dict):
                     meta = payload.get("metadata")
                     if isinstance(meta, dict):
+                        self._last_config_metadata = meta
+                        config_name_hint = meta.get("config_name")
                         detected_run_plan = meta.get("run_plan")
+                else:
+                    self._last_config_metadata = None
             except Exception:
                 detected_run_plan = None
+                self._last_config_metadata = None
+        else:
+            self._last_config_metadata = None
+
+        if isinstance(detected_run_plan, Mapping):
+            detected_run_plan = dict(detected_run_plan)
+            if config_name_hint is None and self._last_config_metadata:
+                config_name_hint = self._last_config_metadata.get("config_name")
+            if config_name_hint is None:
+                config_name_hint = path_obj.name
+            detected_run_plan.setdefault("config_name", config_name_hint)
+        elif config_name_hint is not None:
+            detected_run_plan = {
+                "run_type": "single",
+                "run_label": None,
+                "config_name": config_name_hint,
+            }
 
         if detected_run_plan is not None:
             self.pending_run_plan = detected_run_plan
@@ -3061,6 +5920,28 @@ class RunQueueTab(QWidget):
             except Exception:
                 pass
 
+        config_data: Optional[Dict[str, Any]] = None
+        try:
+            config_data = self._load_config_data(config_path)
+        except Exception as exc:
+            logger.warning("config preview load failed", config=config_path, error=str(exc))
+
+        if isinstance(config_data, dict):
+            self._last_config_data = config_data
+        else:
+            self._last_config_data = None
+
+        self._update_config_preview(config_path, self._last_config_data)
+        if hasattr(self, 'apply_to_gui_btn'):
+            self.apply_to_gui_btn.setEnabled(self._last_config_data is not None)
+
+        if apply_to_ui and self.main_window is not None and self._last_config_data is not None:
+            plan_for_ui = self.pending_run_plan or self._default_run_plan()
+            try:
+                self.main_window.apply_config_from_run_queue(self._last_config_data, run_plan=plan_for_ui)
+            except Exception as exc:
+                logger.warning("apply config to ui failed", config=config_path, error=str(exc))
+
     def _load_config_data(self, config_path: str) -> Dict[str, Any]:
         path_obj = Path(config_path)
         if path_obj.exists():
@@ -3072,6 +5953,84 @@ class RunQueueTab(QWidget):
         if self.workspace_manager is not None:
             return self.workspace_manager.load_config(path_obj.name)
         raise FileNotFoundError(f"Configuration not found: {config_path}")
+
+    def _update_config_preview(
+        self,
+        config_path: Optional[str],
+        config_data: Optional[Mapping[str, Any]],
+    ) -> None:
+        if not hasattr(self, 'config_preview') or self.config_preview is None:
+            return
+
+        if not config_data:
+            self.config_preview.clear()
+            if config_path:
+                self.config_preview.setPlainText(f"No preview available for {config_path}.")
+            else:
+                self.config_preview.setPlainText("Load or select a configuration to preview its contents.")
+            return
+
+        preview_text = self._format_config_preview(config_path, config_data)
+        self.config_preview.setPlainText(preview_text)
+
+    def _format_config_preview(
+        self,
+        config_path: Optional[str],
+        config_data: Mapping[str, Any],
+    ) -> str:
+        lines: List[str] = []
+        if config_path:
+            lines.append(f"File: {config_path}")
+
+        run_section = config_data.get("run")
+        if isinstance(run_section, Mapping):
+            stages = run_section.get("stages")
+            if isinstance(stages, list):
+                stages_text = ", ".join(str(stage) for stage in stages)
+            else:
+                stages_text = str(stages)
+            seed = run_section.get("seed")
+            lines.append("Run Settings:")
+            lines.append(f"  stages: {stages_text}")
+            if seed is not None:
+                lines.append(f"  seed: {seed}")
+            threads = run_section.get("threads")
+            if threads is not None:
+                lines.append(f"  threads: {threads}")
+
+        for section_name in ("subject", "api", "product", "maneuver"):
+            payload = config_data.get(section_name)
+            if not isinstance(payload, Mapping):
+                continue
+            ref_value = payload.get("ref") or "(missing ref)"
+            lines.append(f"{section_name.title()}:")
+            lines.append(f"  ref: {ref_value}")
+            overrides = payload.get("overrides")
+            if isinstance(overrides, Mapping) and overrides:
+                keys = ", ".join(sorted(str(key) for key in overrides.keys()))
+                lines.append(f"  overrides: {keys}")
+            variability = payload.get("variability") or payload.get("variability_overrides")
+            if isinstance(variability, Mapping) and variability:
+                vkeys = ", ".join(sorted(str(key) for key in variability.keys()))
+                lines.append(f"  variability: {vkeys}")
+
+        plan = self.pending_run_plan
+        if isinstance(plan, Mapping):
+            run_type = plan.get("run_type")
+            label = plan.get("run_label")
+            lines.append("Run Plan:")
+            if run_type:
+                lines.append(f"  type: {run_type}")
+            if label:
+                lines.append(f"  label: {label}")
+            bindings = plan.get("workspace_bindings")
+            if isinstance(bindings, Mapping) and bindings:
+                binding_text = ", ".join(f"{key}→{value}" for key, value in bindings.items())
+                lines.append(f"  workspace bindings: {binding_text}")
+
+        if not lines:
+            return "No preview content available."
+        return "\n".join(lines)
 
     @staticmethod
     def _coerce_json_value(value: Any) -> Any:
@@ -3170,7 +6129,9 @@ class RunQueueTab(QWidget):
             info = self.saved_config_info.get(path)
             if info is not None:
                 run_plan = info.get("run_plan")
-            self.set_selected_config(path, run_plan=run_plan)
+            self.set_selected_config(path, run_plan=run_plan, apply_to_ui=False)
+        else:
+            self.set_selected_config(None, apply_to_ui=False)
 
     def start_run(self):
         """Start a new simulation run using the selected configuration."""
@@ -3230,6 +6191,7 @@ class RunQueueTab(QWidget):
         self.run_logs[run_id] = []
         self.current_log_run_id = run_id
         self.add_run_row(run_id)
+        self._refresh_row_queue_status(run_id)
         if show_message:
             QMessageBox.information(self, "Run Started", f"Started run: {run_id}")
         self.pending_run_plan = self._default_run_plan()
@@ -3357,6 +6319,7 @@ class RunQueueTab(QWidget):
             self.run_logs[run_id] = []
             self.current_log_run_id = run_id
             self.add_run_row(run_id)
+            self._refresh_row_queue_status(run_id)
             queued_run_ids.append(run_id)
             if run_id not in child_run_ids:
                 child_run_ids.append(run_id)
@@ -3489,6 +6452,8 @@ class RunQueueTab(QWidget):
             self.run_logs[run_id] = []
             self.current_log_run_id = run_id
             self.add_run_row(run_id)
+            self._refresh_row_queue_status(run_id)
+            self._refresh_row_queue_status(run_id)
 
         self.workspace_manager.update_run_status(
             parent_run_id,
@@ -3904,6 +6869,7 @@ class RunQueueTab(QWidget):
             self.run_logs[run_id] = []
             self.current_log_run_id = run_id
             self.add_run_row(run_id)
+            self._refresh_row_queue_status(run_id)
             queued_run_ids.append(run_id)
             if run_id not in child_run_ids:
                 child_run_ids.append(run_id)
@@ -4496,6 +7462,47 @@ class RunQueueTab(QWidget):
                 f"Queued {len(queued_runs)} run(s): {preview}"
             )
 
+    def apply_selected_to_gui(self) -> None:
+        if self.main_window is None:
+            if self.isVisible():
+                QMessageBox.warning(self, "Apply Config", "Unable to reach main window context.")
+            return
+
+        if self._last_config_data is None:
+            if self.isVisible():
+                QMessageBox.information(
+                    self,
+                    "Apply Config",
+                    "Select or load a configuration before applying it to the Study Designer.",
+                )
+            return
+
+        run_plan: Optional[Dict[str, Any]] = None
+        if self.selected_config_path:
+            info = self.saved_config_info.get(self.selected_config_path)
+            if isinstance(info, Mapping):
+                run_plan = info.get("run_plan")
+        if run_plan is None:
+            run_plan = self.pending_run_plan or self._default_run_plan()
+
+        try:
+            self.main_window.apply_config_from_run_queue(self._last_config_data, run_plan=run_plan)
+            if self.isVisible():
+                QMessageBox.information(
+                    self,
+                    "Apply Config",
+                    "Configuration applied to the Study Designer and related tabs.",
+                )
+            if hasattr(self.main_window, 'tab_widget') and self.main_window.tab_widget is not None:
+                self.main_window.tab_widget.setCurrentWidget(self.main_window.study_designer_tab)
+        except Exception as exc:
+            if self.isVisible():
+                QMessageBox.critical(
+                    self,
+                    "Apply Config",
+                    f"Failed to apply configuration: {exc}",
+                )
+
     def on_config_table_selection(self):
         if not hasattr(self, 'config_table') or self.config_table.selectionModel() is None:
             return
@@ -4508,7 +7515,7 @@ class RunQueueTab(QWidget):
             return
         path_value = item.data(Qt.ItemDataRole.UserRole)
         if path_value:
-            self.set_selected_config(path_value)
+            self.set_selected_config(path_value, apply_to_ui=False)
 
     def on_config_table_double_clicked(self, _: QTableWidgetItem):
         self.queue_selected_configs()
@@ -4715,6 +7722,45 @@ class RunQueueTab(QWidget):
             if details_item:
                 details_item.setText(message)
 
+    def _queued_position(self, run_id: str) -> Optional[int]:
+        if not self.process_manager:
+            return None
+        pending = getattr(self.process_manager, "pending_requests", [])
+        for idx, (request, _) in enumerate(pending):
+            if request.run_id == run_id:
+                return idx
+        return None
+
+    def _refresh_row_queue_status(self, run_id: str) -> None:
+        if not self.process_manager or self.process_manager.is_run_active(run_id):
+            return
+        position = self._queued_position(run_id)
+        if position is None:
+            return
+        message = f"Waiting for slot (position {position + 1})"
+        self.update_row_status(run_id, "Queued", message)
+
+    def on_process_queued(self, run_id: str, position: int) -> None:
+        message = f"Waiting for slot (position {position + 1})"
+        self.update_row_status(run_id, "Queued", message)
+
+    def on_queue_positions_updated(self) -> None:
+        if not self.process_manager:
+            return
+        for request, _ in getattr(self.process_manager, "pending_requests", []):
+            self._refresh_row_queue_status(request.run_id)
+
+    def on_parallel_changed(self, value: int) -> None:
+        if not self.process_manager:
+            return
+        try:
+            self.process_manager.set_max_parallel_processes(value)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Parallel Slots", str(exc))
+            self.parallel_spin.blockSignals(True)
+            self.parallel_spin.setValue(self.process_manager.max_parallel_processes)
+            self.parallel_spin.blockSignals(False)
+
     def on_process_metric(self, run_id: str, metric_name: str, value: float):
         details = f"{metric_name}: {value:.3g}"
         self.update_row_status(run_id, "Running", details)
@@ -4868,6 +7914,10 @@ class ResultsViewerTab(QWidget):
         self.stage_metric_columns: Dict[str, List[str]] = {}
         self.study_stage_order: List[str] = []
         self.study_metric_filter_edit: Optional[QLineEdit] = None
+        self.current_table_full_df: Optional[pd.DataFrame] = None
+        self.current_table_subset_df: Optional[pd.DataFrame] = None
+        self.current_table_dataset: Optional[str] = None
+        self.study_table_df: Optional[pd.DataFrame] = None
         self.init_ui()
 
     @staticmethod
@@ -4878,6 +7928,256 @@ class ResultsViewerTab(QWidget):
             prefix, suffix = name.split("__", 1)
             return suffix, prefix
         return name, None
+
+    def _build_group_datasets(self, metadata: Dict[str, Any]) -> Dict[str, pd.DataFrame]:
+        """Aggregate child run datasets so group runs expose raw results."""
+
+        if self.workspace_manager is None or not metadata:
+            return {}
+
+        run_type = metadata.get("run_type", "")
+        group_types = {
+            "parameter_estimation_group",
+            "virtual_trial_group",
+            "virtual_bioequivalence_group",
+            "sweep_group",
+        }
+        if run_type not in group_types:
+            return {}
+
+        raw_child_ids = metadata.get("child_run_ids") or []
+        child_ids: List[str] = []
+        seen_children: Set[str] = set()
+        for run_id in raw_child_ids:
+            child = str(run_id)
+            if not child or child in seen_children:
+                continue
+            seen_children.add(child)
+            child_ids.append(child)
+        if not child_ids:
+            return {}
+
+        summary_lookup: Dict[str, Dict[str, Any]] = {}
+        if run_type == "parameter_estimation_group":
+            summary = metadata.get("parameter_estimation_summary") or {}
+            for record in summary.get("records", []) or []:
+                if not isinstance(record, dict):
+                    continue
+                child_run = record.get("run_id")
+                if child_run:
+                    summary_lookup[str(child_run)] = record
+
+        aggregated_frames: Dict[Tuple[str, Optional[str]], List[pd.DataFrame]] = {}
+
+        for child_id in child_ids:
+            child_results = self.loaded_results.get(child_id)
+            if child_results is None:
+                try:
+                    child_results = self.workspace_manager.load_run_results(child_id)
+                except FileNotFoundError:
+                    logger.warning(
+                        "Group dataset child results missing for parent %s (child %s)",
+                        metadata.get("run_id"),
+                        child_id,
+                    )
+                    continue
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning(
+                        "Group dataset child results error for parent %s (child %s): %s",
+                        metadata.get("run_id"),
+                        child_id,
+                        exc,
+                    )
+                    continue
+
+            if not isinstance(child_results, dict):
+                continue
+
+            child_meta = self.run_metadata.get(child_id)
+            if child_meta is None:
+                try:
+                    child_meta = self.workspace_manager.get_run_info(child_id) or {}
+                except Exception:  # pragma: no cover - workspace I/O guard
+                    child_meta = {}
+
+            base_columns: Dict[str, Any] = {"source_run_id": child_id}
+            if isinstance(child_meta, dict):
+                label = child_meta.get("display_label") or child_meta.get("label")
+                if label:
+                    base_columns["source_label"] = label
+                manifest_index = child_meta.get("manifest_index")
+                if manifest_index is not None and "manifest_index" not in base_columns:
+                    base_columns["manifest_index"] = manifest_index
+                manifest_run_id = child_meta.get("manifest_run_id")
+                if manifest_run_id and "manifest_run_id" not in base_columns:
+                    base_columns["manifest_run_id"] = manifest_run_id
+                child_run_type = child_meta.get("run_type")
+                if child_run_type:
+                    base_columns["source_run_type"] = child_run_type
+            else:
+                child_meta = {}
+
+            if run_type == "parameter_estimation_group":
+                base_columns.update(
+                    {
+                        "estimation_parameter": child_meta.get("estimation_parameter"),
+                        "estimation_direction": child_meta.get("estimation_direction"),
+                        "estimation_value": child_meta.get("estimation_value"),
+                    }
+                )
+                overrides = child_meta.get("estimation_overrides") or child_meta.get("parameter_overrides")
+                if overrides and "estimation_overrides" not in base_columns:
+                    try:
+                        base_columns["estimation_overrides"] = json.dumps(overrides, sort_keys=True)
+                    except TypeError:
+                        base_columns["estimation_overrides"] = str(overrides)
+                record = summary_lookup.get(child_id)
+                if record:
+                    for key in ("objective", "sse", "mae", "rmse", "is_best"):
+                        if key in record and record[key] is not None:
+                            base_columns[f"summary_{key}"] = record[key]
+            elif run_type in {"virtual_trial_group", "virtual_bioequivalence_group"}:
+                base_columns.update(
+                    {
+                        "subject_index": child_meta.get("subject_index"),
+                        "subject_name": child_meta.get("subject_name"),
+                        "seed": child_meta.get("seed"),
+                        "api_name": child_meta.get("api_name"),
+                    }
+                )
+            elif run_type == "sweep_group":
+                base_columns["sweep_index"] = child_meta.get("manifest_index")
+                overrides = child_meta.get("sweep_overrides") or child_meta.get("parameter_overrides")
+                if overrides:
+                    try:
+                        base_columns["sweep_overrides"] = json.dumps(overrides, sort_keys=True)
+                    except TypeError:
+                        base_columns["sweep_overrides"] = str(overrides)
+
+            for dataset_name, frame in child_results.items():
+                if not isinstance(frame, pd.DataFrame) or frame.empty:
+                    continue
+
+                base_dataset, dataset_prefix = self._split_dataset_name(dataset_name)
+                augmented = frame.copy()
+
+                # Attach run-level metadata columns when they are not already provided.
+                for column_name, value in base_columns.items():
+                    if value is None or column_name in augmented.columns:
+                        continue
+                    augmented[column_name] = value
+
+                if dataset_prefix and "dataset_prefix" not in augmented.columns:
+                    augmented["dataset_prefix"] = dataset_prefix
+
+                if run_type in {"virtual_trial_group", "virtual_bioequivalence_group"} and dataset_prefix:
+                    products = child_meta.get("products")
+                    if isinstance(products, dict):
+                        product_info = products.get(dataset_prefix)
+                        if isinstance(product_info, dict):
+                            role = product_info.get("role")
+                            if role and "product_role" not in augmented.columns:
+                                augmented["product_role"] = role
+
+                key = (base_dataset, dataset_prefix)
+                aggregated_frames.setdefault(key, []).append(augmented)
+
+        combined_results: Dict[str, pd.DataFrame] = {}
+        for (base_dataset, dataset_prefix), frames in aggregated_frames.items():
+            if not frames:
+                continue
+            try:
+                combined = pd.concat(frames, ignore_index=True, sort=False)
+            except Exception:  # pragma: no cover - fallback for unusual frames
+                combined = pd.concat(frames, ignore_index=True)
+
+            dataset_key = base_dataset if dataset_prefix is None else f"{dataset_prefix}__{base_dataset}"
+            if not combined.empty:
+                combined_results[dataset_key] = combined
+
+        return combined_results
+
+    def _iter_plot_frames(
+        self,
+        run_id: str,
+        dataset_name: Optional[str],
+        base_dataset: Optional[str],
+        dataset_prefix: Optional[str],
+    ) -> List[Tuple[Tuple[str, Optional[str]], str, pd.DataFrame]]:
+        """Yield (key, label, frame) tuples for plotting, expanding grouped data."""
+
+        df = self._dataset_for_run(run_id, dataset_name, base_dataset, dataset_prefix)
+        if df is None or df.empty:
+            return []
+
+        frames: List[Tuple[Tuple[str, Optional[str]], str, pd.DataFrame]] = []
+
+        if "source_run_id" in df.columns:
+            grouped = df.groupby("source_run_id")
+            for source_run_id, subset in grouped:
+                if subset.empty:
+                    continue
+                source_id = str(source_run_id) if source_run_id is not None else run_id
+                label_hint = subset.iloc[0].get("source_label") if not subset.empty else None
+                label = str(label_hint or source_id)
+                if dataset_prefix:
+                    label = f"{label} · {dataset_prefix}"
+                frames.append(((source_id, dataset_prefix), label, subset))
+        else:
+            label = f"{run_id} · {dataset_prefix}" if dataset_prefix else run_id
+            frames.append(((run_id, dataset_prefix), label, df))
+
+        return frames
+
+    def _collect_plot_frames(
+        self,
+        run_ids: Sequence[str],
+        dataset_name: Optional[str],
+        base_dataset: Optional[str],
+        dataset_prefix: Optional[str],
+    ) -> List[Tuple[str, pd.DataFrame]]:
+        """Collect unique plot frames across selected runs."""
+
+        collected: List[Tuple[str, pd.DataFrame]] = []
+        seen_keys: Set[Tuple[str, Optional[str]]] = set()
+
+        for run_id in run_ids:
+            for key, label, frame in self._iter_plot_frames(run_id, dataset_name, base_dataset, dataset_prefix):
+                if frame is None or frame.empty:
+                    continue
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                collected.append((label, frame))
+
+        return collected
+
+    def _clear_table_state(self) -> None:
+        self.current_table_full_df = None
+        self.current_table_subset_df = None
+        self.current_table_dataset = None
+        self.study_table_df = None
+        self._update_table_action_state()
+
+    def _update_table_action_state(self) -> None:
+        has_raw = (
+            self.view_mode_combo is not None
+            and self.view_mode_combo.currentData() == "raw"
+            and self.current_table_subset_df is not None
+            and not self.current_table_subset_df.empty
+        )
+        has_study = (
+            self.view_mode_combo is not None
+            and self.view_mode_combo.currentData() == "study"
+            and self.study_table_df is not None
+            and not self.study_table_df.empty
+        )
+
+        enabled = has_raw or has_study
+        if hasattr(self, "copy_table_btn") and isinstance(self.copy_table_btn, QPushButton):
+            self.copy_table_btn.setEnabled(enabled)
+        if hasattr(self, "export_table_btn") and isinstance(self.export_table_btn, QPushButton):
+            self.export_table_btn.setEnabled(enabled)
 
     def _dataset_for_run(
         self,
@@ -5199,6 +8499,19 @@ class ResultsViewerTab(QWidget):
         detail_layout.addWidget(self.study_controls_widget)
         self.study_controls_widget.hide()
 
+        table_actions_layout = QHBoxLayout()
+        table_actions_layout.setContentsMargins(0, 0, 0, 0)
+        self.copy_table_btn = QPushButton("Copy Table")
+        self.copy_table_btn.clicked.connect(self.copy_visible_table)
+        self.export_table_btn = QPushButton("Export CSV…")
+        self.export_table_btn.clicked.connect(self.export_visible_table)
+        table_actions_layout.addWidget(self.copy_table_btn)
+        table_actions_layout.addWidget(self.export_table_btn)
+        table_actions_layout.addStretch()
+        self.table_actions_widget = QWidget()
+        self.table_actions_widget.setLayout(table_actions_layout)
+        detail_layout.addWidget(self.table_actions_widget)
+
         self.results_table = QTableWidget()
         detail_layout.addWidget(self.results_table)
 
@@ -5231,6 +8544,7 @@ class ResultsViewerTab(QWidget):
         self.setLayout(layout)
 
         self.on_view_mode_changed()
+        self._update_table_action_state()
 
     # --- Run selection and loading -------------------------------------------------
 
@@ -5239,6 +8553,7 @@ class ResultsViewerTab(QWidget):
         self.loaded_results.clear()
         self.run_metadata.clear()
         self.active_run_id = None
+        self._clear_table_state()
         self.refresh_runs()
         if self.view_mode_combo is not None:
             self.view_mode_combo.setCurrentIndex(0)
@@ -5282,6 +8597,7 @@ class ResultsViewerTab(QWidget):
             if MATPLOTLIB_AVAILABLE:
                 self.figure.clear()
                 self.canvas.draw_idle()
+            self._clear_table_state()
             self.run_list.blockSignals(False)
             return
 
@@ -5289,6 +8605,7 @@ class ResultsViewerTab(QWidget):
         if not runs:
             self.status_label.setText("No runs have been recorded in this workspace.")
             self.status_label.setStyleSheet("color: gray;")
+            self._clear_table_state()
             self.run_list.blockSignals(False)
             return
 
@@ -5342,6 +8659,7 @@ class ResultsViewerTab(QWidget):
             dataset_name = self.dataset_combo.currentData()
             if dataset_name:
                 self.display_dataset(dataset_name)
+        self._update_table_action_state()
 
     def update_study_placeholder(self):
         if self.study_placeholder_label is None or not self.study_placeholder_label.isVisible():
@@ -5692,6 +9010,8 @@ class ResultsViewerTab(QWidget):
             if MATPLOTLIB_AVAILABLE:
                 self.figure.clear()
                 self.canvas.draw_idle()
+            self.study_table_df = None
+            self._update_table_action_state()
             return
 
         df = self.collect_study_dataframe(selected_runs)
@@ -5709,6 +9029,8 @@ class ResultsViewerTab(QWidget):
             if MATPLOTLIB_AVAILABLE:
                 self.figure.clear()
                 self.canvas.draw_idle()
+            self.study_table_df = None
+            self._update_table_action_state()
             return
 
         if self.study_placeholder_label is not None:
@@ -5727,9 +9049,11 @@ class ResultsViewerTab(QWidget):
             return
 
         df = self.get_filtered_study_df()
+        self.study_table_df = None
         if df is None or df.empty:
             self.study_table.setRowCount(0)
             self.study_table.setColumnCount(0)
+            self._update_table_action_state()
             return
 
         metric_columns = self._available_metric_columns(df)
@@ -5754,6 +9078,7 @@ class ResultsViewerTab(QWidget):
         describe_df.reset_index(inplace=True)
         describe_df.rename(columns={"index": "metric"}, inplace=True)
         describe_df["metric"] = describe_df["metric"].apply(self._format_metric_column_label)
+        self.study_table_df = describe_df.copy()
 
         self.study_table.setRowCount(len(describe_df))
         self.study_table.setColumnCount(len(describe_df.columns))
@@ -5766,6 +9091,7 @@ class ResultsViewerTab(QWidget):
                 self.study_table.setItem(row_idx, col_idx, QTableWidgetItem(display_value))
 
         self.study_table.resizeColumnsToContents()
+        self._update_table_action_state()
 
     def update_study_plot(self):
         if not MATPLOTLIB_AVAILABLE:
@@ -5868,6 +9194,7 @@ class ResultsViewerTab(QWidget):
                 self.figure.clear()
                 self.canvas.draw_idle()
             self.update_study_placeholder()
+            self._clear_table_state()
             return
 
         for run_id in selected_runs:
@@ -6027,6 +9354,10 @@ class ResultsViewerTab(QWidget):
             QMessageBox.critical(self, "Results Error", f"Failed to load results for {run_id}: {exc}")
             results = {}
 
+        group_results = self._build_group_datasets(info)
+        for name, dataframe in group_results.items():
+            results.setdefault(name, dataframe)
+
         self.loaded_results[run_id] = results
         self.run_metadata[run_id] = info
 
@@ -6126,6 +9457,10 @@ class ResultsViewerTab(QWidget):
         if self.active_run_id is None:
             return
 
+        self.current_table_dataset = dataset_name
+        self.current_table_full_df = None
+        self.current_table_subset_df = None
+
         base_dataset, dataset_prefix = self._split_dataset_name(dataset_name)
 
         if base_dataset == "pbpk_regional_timeseries":
@@ -6173,10 +9508,15 @@ class ResultsViewerTab(QWidget):
             self.results_table.setRowCount(0)
             self.results_table.setColumnCount(0)
             self.update_plots()
+            self._update_table_action_state()
             return
 
+        full_df = df.reset_index(drop=True)
+        self.current_table_full_df = full_df
+
         max_rows = 200
-        subset = df.head(max_rows)
+        subset = full_df.head(max_rows)
+        self.current_table_subset_df = subset.copy()
 
         self.results_table.setRowCount(len(subset))
         self.results_table.setColumnCount(len(subset.columns))
@@ -6188,10 +9528,10 @@ class ResultsViewerTab(QWidget):
                 display_value = "" if pd.isna(value) else str(value)
                 self.results_table.setItem(row_idx, col_idx, QTableWidgetItem(display_value))
 
-        if len(df) > max_rows:
-            remaining = len(df) - max_rows
+        if len(full_df) > max_rows:
+            remaining = len(full_df) - max_rows
             self.status_label.setText(
-                f"Showing first {max_rows} of {len(df)} rows for {dataset_name}. {remaining} additional rows not displayed."
+                f"Showing first {max_rows} of {len(full_df)} rows for {dataset_name}. {remaining} additional rows not displayed."
             )
             self.status_label.setStyleSheet("color: #f57c00;")
         else:
@@ -6203,42 +9543,43 @@ class ResultsViewerTab(QWidget):
                     best_text = f"Best: {best_run} (objective {best_objective:.4g})"
                 else:
                     best_text = f"Best: {best_run}"
-                self.status_label.setText(f"Parameter estimation summary across {len(df)} runs. {best_text}.")
+                self.status_label.setText(f"Parameter estimation summary across {len(full_df)} runs. {best_text}.")
                 self.status_label.setStyleSheet("color: #2e7d32;")
             elif dataset_name == "parameter_estimation_residuals":
-                run_count = df["run_id"].nunique() if "run_id" in df.columns else 0
-                self.status_label.setText(f"Residual samples for {run_count} run(s), {len(df)} rows.")
+                run_count = full_df["run_id"].nunique() if "run_id" in full_df.columns else 0
+                self.status_label.setText(f"Residual samples for {run_count} run(s), {len(full_df)} rows.")
                 self.status_label.setStyleSheet("color: #2e7d32;")
             elif dataset_name == "parameter_estimation_regional":
-                run_count = df["run_id"].nunique() if "run_id" in df.columns else 0
-                self.status_label.setText(f"Regional residuals for {run_count} run(s), {len(df)} rows.")
+                run_count = full_df["run_id"].nunique() if "run_id" in full_df.columns else 0
+                self.status_label.setText(f"Regional residuals for {run_count} run(s), {len(full_df)} rows.")
                 self.status_label.setStyleSheet("color: #2e7d32;")
             elif dataset_name == "parameter_estimation_overlay":
-                series_count = df["series"].nunique() if "series" in df.columns else 0
-                self.status_label.setText(f"Overlay dataset with {series_count} series and {len(df)} points.")
+                series_count = full_df["series"].nunique() if "series" in full_df.columns else 0
+                self.status_label.setText(f"Overlay dataset with {series_count} series and {len(full_df)} points.")
                 self.status_label.setStyleSheet("color: #2e7d32;")
             elif dataset_name == "virtual_trial_summary":
-                self.status_label.setText(f"Virtual trial summary across {len(df)} product/metric rows.")
+                self.status_label.setText(f"Virtual trial summary across {len(full_df)} product/metric rows.")
                 self.status_label.setStyleSheet("color: #2e7d32;")
             elif dataset_name == "virtual_trial_subjects":
-                run_count = df["run_id"].nunique() if "run_id" in df.columns else 0
-                self.status_label.setText(f"Virtual trial subjects: {run_count} run(s), {len(df)} rows.")
+                run_count = full_df["run_id"].nunique() if "run_id" in full_df.columns else 0
+                self.status_label.setText(f"Virtual trial subjects: {run_count} run(s), {len(full_df)} rows.")
                 self.status_label.setStyleSheet("color: #2e7d32;")
             elif dataset_name == "virtual_bioequivalence_summary":
-                self.status_label.setText(f"VBE summary metrics across {len(df)} entries.")
+                self.status_label.setText(f"VBE summary metrics across {len(full_df)} entries.")
                 self.status_label.setStyleSheet("color: #2e7d32;")
             elif dataset_name == "virtual_bioequivalence_subjects":
-                run_count = df["run_id"].nunique() if "run_id" in df.columns else 0
-                self.status_label.setText(f"VBE subject metrics for {run_count} run(s), {len(df)} rows.")
+                run_count = full_df["run_id"].nunique() if "run_id" in full_df.columns else 0
+                self.status_label.setText(f"VBE subject metrics for {run_count} run(s), {len(full_df)} rows.")
                 self.status_label.setStyleSheet("color: #2e7d32;")
             elif dataset_name == "virtual_bioequivalence_product_summary":
-                self.status_label.setText(f"Product-level summary across {len(df)} entries.")
+                self.status_label.setText(f"Product-level summary across {len(full_df)} entries.")
                 self.status_label.setStyleSheet("color: #2e7d32;")
             else:
-                self.status_label.setText(f"Displaying {len(df)} rows for {dataset_name}.")
+                self.status_label.setText(f"Displaying {len(full_df)} rows for {dataset_name}.")
                 self.status_label.setStyleSheet("color: #2e7d32;")
 
         self.update_plots()
+        self._update_table_action_state()
 
     def update_plots(self):
         if self.view_mode_combo and self.view_mode_combo.currentData() == "study":
@@ -6266,18 +9607,16 @@ class ResultsViewerTab(QWidget):
         ax = self.figure.add_subplot(111)
 
         if plot_mode in {"pk_linear", "pk_log"} and base_dataset == "pk_curve":
-            for run_id in selected_runs:
-                df = self._dataset_for_run(run_id, dataset_name, base_dataset, dataset_prefix)
+            frames = self._collect_plot_frames(selected_runs, dataset_name, base_dataset, dataset_prefix)
+            plotted = False
+            for label, df in frames:
                 if df is None or df.empty or not {"t", "plasma_conc"}.issubset(df.columns):
                     continue
                 df_sorted = df.sort_values("t")
-                if dataset_prefix:
-                    label = dataset_prefix if len(selected_runs) == 1 else f"{run_id}:{dataset_prefix}"
-                else:
-                    label = run_id
                 ax.plot(df_sorted["t"], df_sorted["plasma_conc"], label=label)
+                plotted = True
 
-            if not ax.has_data():
+            if not plotted:
                 ax.text(0.5, 0.5, "No PK data", ha='center', va='center', transform=ax.transAxes, color='0.5')
                 ax.set_axis_off()
             else:
@@ -6294,14 +9633,11 @@ class ResultsViewerTab(QWidget):
 
             regions = set()
             aggregated: Dict[str, pd.Series] = {}
-            for run_id in selected_runs:
-                df = self._dataset_for_run(run_id, dataset_name, base_dataset, dataset_prefix)
+            frames = self._collect_plot_frames(selected_runs, dataset_name, base_dataset, dataset_prefix)
+            for label, df in frames:
                 if df is None or value_column not in df.columns:
                     continue
                 series = df.groupby("region")[value_column].sum()
-                label = dataset_prefix if dataset_prefix else run_id
-                if dataset_prefix and len(selected_runs) > 1:
-                    label = f"{run_id}:{dataset_prefix}"
                 aggregated[label] = series
                 regions.update(series.index)
 
@@ -6324,14 +9660,9 @@ class ResultsViewerTab(QWidget):
                 ax.legend()
 
         elif plot_mode == "dep_heatmap" and base_dataset == "deposition_bins":
-            if dataset_prefix:
-                run_id = selected_runs[0]
-                df = self._dataset_for_run(run_id, dataset_name, base_dataset, dataset_prefix)
-                run_label = dataset_prefix if len(selected_runs) == 1 else f"{run_id}:{dataset_prefix}"
-            else:
-                run_id = selected_runs[0]
-                df = self._dataset_for_run(run_id, dataset_name, base_dataset, dataset_prefix)
-                run_label = run_id
+            frames = self._collect_plot_frames(selected_runs, dataset_name, base_dataset, dataset_prefix)
+            df = frames[0][1] if frames else None
+            run_label = frames[0][0] if frames else None
             if df is None or "fraction_of_dose" not in df.columns:
                 ax.text(0.5, 0.5, "No deposition data", ha='center', va='center', transform=ax.transAxes, color='0.5')
                 ax.set_axis_off()
@@ -6352,24 +9683,18 @@ class ResultsViewerTab(QWidget):
                     self.figure.colorbar(im, ax=ax, label='Fraction of dose')
 
         elif plot_mode == "regional_auc_bar" and base_dataset == "regional_auc":
-            datasets = []
+            frames = self._collect_plot_frames(selected_runs, dataset_name, base_dataset, dataset_prefix)
             regions = set()
-            for run_id in selected_runs:
-                df = self._dataset_for_run(run_id, dataset_name, base_dataset, dataset_prefix)
-                if df is None or df.empty:
-                    continue
-                label = dataset_prefix if dataset_prefix else run_id
-                if dataset_prefix and len(selected_runs) > 1:
-                    label = f"{run_id}:{dataset_prefix}"
-                datasets.append((label, df))
+            for _, df in frames:
                 regions.update(df["region"].dropna().unique())
-            if not datasets:
+
+            if not frames:
                 ax.text(0.5, 0.5, "No regional AUC data", ha='center', va='center', transform=ax.transAxes, color='0.5')
                 ax.set_axis_off()
             else:
                 regions = sorted(regions)
                 x = np.arange(len(regions))
-                bar_width = 0.8 / max(len(datasets), 1)
+                bar_width = 0.8 / max(len(frames), 1)
                 metric_specs = [
                     ("auc_elf", "ELF"),
                     ("auc_epithelium_pmol_h_per_ml", "Epithelium"),
@@ -6381,20 +9706,20 @@ class ResultsViewerTab(QWidget):
                 ]
 
                 available_metrics = []
-                for column, label in metric_specs:
-                    for _, df in datasets:
+                for column, metric_label in metric_specs:
+                    for _, df in frames:
                         if column in df.columns and not df[column].fillna(0).eq(0).all():
-                            available_metrics.append((column, label))
+                            available_metrics.append((column, metric_label))
                             break
 
                 if not available_metrics:
                     available_metrics = [("auc_elf", "ELF")]
 
-                for idx, (run_id, df) in enumerate(datasets):
+                for idx, (frame_label, df) in enumerate(frames):
                     regional_df = df.set_index("region")
                     offsets = x - 0.4 + bar_width / 2 + idx * bar_width
                     bottom = np.zeros(len(regions))
-                    for column, label in available_metrics:
+                    for column, metric_label in available_metrics:
                         if column not in regional_df.columns:
                             continue
                         values = regional_df[column].reindex(regions).fillna(0).to_numpy(dtype=float)
@@ -6405,7 +9730,7 @@ class ResultsViewerTab(QWidget):
                             values,
                             width=bar_width,
                             bottom=bottom,
-                            label=f"{run_id} - {label}"
+                            label=f"{frame_label} - {metric_label}"
                         )
                         bottom += values
 
@@ -6595,6 +9920,75 @@ class ResultsViewerTab(QWidget):
 
     # --- Export -------------------------------------------------------------------
 
+    def copy_visible_table(self) -> None:
+        mode = self.view_mode_combo.currentData() if self.view_mode_combo is not None else "raw"
+        if mode == "study":
+            df = self.study_table_df
+            context_label = "study summary"
+        else:
+            df = self.current_table_subset_df
+            context_label = self.current_table_dataset or "results"
+
+        if df is None or df.empty:
+            QMessageBox.information(self, "Copy Table", "No table data is available to copy.")
+            return
+
+        export_df = df.copy().fillna("")
+        clipboard_text = export_df.to_csv(sep="\t", index=False).rstrip("\n")
+        QApplication.clipboard().setText(clipboard_text)
+
+        row_count = len(export_df)
+        self.status_label.setText(f"Copied {row_count} row(s) from {context_label} to clipboard.")
+        self.status_label.setStyleSheet("color: #2e7d32;")
+
+    def export_visible_table(self) -> None:
+        mode = self.view_mode_combo.currentData() if self.view_mode_combo is not None else "raw"
+        if mode == "study":
+            df = self.study_table_df
+            base_name = f"{self.active_run_id or 'study'}_summary"
+        else:
+            df = self.current_table_full_df
+            base_name = self.current_table_dataset or "results"
+
+        if df is None or df.empty:
+            QMessageBox.information(self, "Export Table", "No table data is available to export.")
+            return
+
+        safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in base_name) or "results"
+
+        start_dir = Path.cwd()
+        if self.workspace_manager is not None:
+            try:
+                start_dir = self.workspace_manager.workspace_path
+            except Exception:
+                start_dir = Path.cwd()
+
+        default_path = start_dir / f"{safe_name}.csv"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Table",
+            str(default_path),
+            "CSV files (*.csv);;All files (*)"
+        )
+        if not file_path:
+            return
+
+        path_obj = Path(file_path)
+        if path_obj.suffix.lower() != ".csv":
+            path_obj = path_obj.with_suffix(".csv")
+
+        export_df = df.copy().fillna("")
+
+        try:
+            export_df.to_csv(path_obj, index=False)
+        except Exception as exc:
+            QMessageBox.warning(self, "Export Table", f"Failed to export table: {exc}")
+            return
+
+        row_count = len(export_df)
+        self.status_label.setText(f"Exported {row_count} row(s) to {path_obj}.")
+        self.status_label.setStyleSheet("color: #2e7d32;")
+
     def export_selected_runs(self):
         if self.workspace_manager is None:
             QMessageBox.warning(self, "No Workspace", "Select a workspace before exporting runs.")
@@ -6687,6 +10081,7 @@ class LMPMainWindow(QMainWindow):
         self.population_tab = PopulationTab()
         self.study_designer_tab = StudyDesignerTab()
         self.run_queue_tab = RunQueueTab()
+        self.run_queue_tab.set_main_window(self)
         self.results_tab = ResultsViewerTab()
         self.logs_tab = LogsTab()
 
@@ -6774,6 +10169,32 @@ class LMPMainWindow(QMainWindow):
             self.logs_tab.log_text.append("Configuration ready for simulation")
         # Switch to run queue tab
         self.tab_widget.setCurrentWidget(self.run_queue_tab)
+
+    def apply_config_from_run_queue(
+        self,
+        config_data: Mapping[str, Any],
+        run_plan: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        """Apply a loaded configuration to the relevant tabs."""
+        if not isinstance(config_data, Mapping):
+            return
+
+        try:
+            self.study_designer_tab.apply_config(config_data, run_plan=run_plan)
+        except Exception as exc:
+            logger.warning("apply study designer failed", error=str(exc))
+
+        try:
+            if hasattr(self.population_tab, "apply_config"):
+                self.population_tab.apply_config(config_data)
+        except Exception as exc:
+            logger.warning("apply population tab failed", error=str(exc))
+
+        try:
+            if hasattr(self.api_products_tab, "apply_config"):
+                self.api_products_tab.apply_config(config_data)
+        except Exception as exc:
+            logger.warning("apply api/product tab failed", error=str(exc))
 
     def on_run_completed(self, run_id: str, status: str):
         self.logs_tab.log_text.append(f"Run {run_id} finished with status: {status}")

@@ -124,19 +124,25 @@ _BUILTIN_WORKFLOWS: Dict[str, Workflow] = {
     ),
     "pe_pk_iv": Workflow(
         name="pe_pk_iv",
-        stages=["pk"],
+        stages=["iv_pk"],
+        stage_configs={
+            "iv_pk": {"model": "iv_2c"},
+        },
     ),
     "pe_gi_oral": Workflow(
         name="pe_gi_oral",
-        stages=["gi", "pk"],
+        stages=["gi_pk"],
+        stage_configs={
+            "gi_pk": {"model": "gi_2c"},
+        },
     ),
     "pe_full_pipeline": Workflow(
         name="pe_full_pipeline",
-        stages=["cfd", "deposition", "pbbm", "gi", "pk"],
+        stages=["cfd", "deposition", "pbbm", "pk"],
     ),
     "sa_full_pipeline": Workflow(
         name="sa_full_pipeline",
-        stages=["cfd", "deposition", "pbbm", "gi", "pk"],
+        stages=["cfd", "deposition", "pbbm", "pk"],
     ),
 }
 

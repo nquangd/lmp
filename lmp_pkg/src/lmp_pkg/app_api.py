@@ -5,9 +5,12 @@ and SLURM scripts. All high-level operations flow through these functions.
 """
 
 from __future__ import annotations
+
+import copy
 import uuid
 from pathlib import Path
 from typing import Dict, List, Mapping, Iterable, Optional, Any, Union, Sequence, Tuple
+
 import pandas as pd
 import numpy as np
 import structlog
@@ -84,7 +87,9 @@ def list_available_models() -> Dict[str, List[str]]:
         {
             "deposition": ["null", "clean_lung"],
             "lung_pbbm": ["numba"],
-            "systemic_pk": ["null", "pk_1c", "pk_2c", "pk_3c"]
+            "systemic_pk": ["null", "pk_1c", "pk_2c", "pk_3c"],
+            "iv_pk": ["iv_1c", "iv_2c", "iv_3c"],
+            "gi_pk": ["gi_1c", "gi_2c", "gi_3c"],
         }
     """
     registry = get_registry()
@@ -250,6 +255,102 @@ def _build_stage_overrides_from_config(config: AppConfig) -> Dict[str, Dict[str,
             overrides["pk"] = pk_override
 
     return overrides
+
+
+_STAGE_PARAMETER_OVERRIDE_KEYS = ("iv_pk", "gi_pk")
+
+
+def _set_nested_dict(target: Dict[str, Any], parts: Sequence[str], value: Any) -> None:
+    if not parts:
+        if isinstance(value, Mapping):
+            for key, sub_value in value.items():
+                target[key] = copy.deepcopy(sub_value)
+        return
+
+    current = target
+    for part in parts[:-1]:
+        next_value = current.get(part)
+        if not isinstance(next_value, dict):
+            next_value = {}
+        current[part] = next_value
+        current = next_value
+
+    leaf = parts[-1]
+    if isinstance(value, Mapping):
+        existing = current.get(leaf)
+        if isinstance(existing, dict):
+            merged = dict(existing)
+            for key, sub_value in value.items():
+                merged[key] = copy.deepcopy(sub_value)
+            current[leaf] = merged
+        else:
+            current[leaf] = copy.deepcopy(value)
+    else:
+        current[leaf] = value
+
+
+def _split_stage_parameter_overrides(
+    overrides: Mapping[str, Any]
+) -> Tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]:
+    config_overrides: Dict[str, Any] = {}
+    stage_overrides: Dict[str, Dict[str, Any]] = {}
+
+    for dotted_key, value in overrides.items():
+        matched = False
+        for stage_key in _STAGE_PARAMETER_OVERRIDE_KEYS:
+            if dotted_key == stage_key:
+                if isinstance(value, Mapping):
+                    stage_overrides[stage_key] = copy.deepcopy(value)
+                matched = True
+                break
+
+            prefix = f"{stage_key}."
+            if dotted_key.startswith(prefix):
+                suffix = dotted_key[len(prefix) :]
+                if not suffix:
+                    matched = True
+                    break
+                parts = suffix.split('.')
+                target = stage_overrides.setdefault(stage_key, {})
+                _set_nested_dict(target, parts, value)
+                matched = True
+                break
+
+        if not matched:
+            config_overrides[dotted_key] = value
+
+    return config_overrides, stage_overrides
+
+
+def _merge_stage_overrides(
+    base: Dict[str, Dict[str, Any]],
+    additions: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    if not additions:
+        return base
+
+    merged = {stage: copy.deepcopy(cfg) for stage, cfg in base.items()}
+
+    for stage, override in additions.items():
+        stage_cfg = merged.setdefault(stage, {})
+        for key, value in override.items():
+            if key == "params" and isinstance(value, Mapping):
+                params = stage_cfg.setdefault("params", {})
+                for param_key, param_value in value.items():
+                    params[param_key] = copy.deepcopy(param_value)
+            elif isinstance(value, Mapping):
+                existing = stage_cfg.get(key)
+                if isinstance(existing, dict):
+                    combined = dict(existing)
+                    for sub_key, sub_value in value.items():
+                        combined[sub_key] = copy.deepcopy(sub_value)
+                    stage_cfg[key] = combined
+                else:
+                    stage_cfg[key] = copy.deepcopy(value)
+            else:
+                stage_cfg[key] = value
+
+    return merged
 
 
 def _resolve_config_value(config: AppConfig, dotted_path: str) -> Any:
@@ -832,8 +933,13 @@ def run_single_simulation(
     
     logger.info("Starting simulation", run_id=run_id)
 
+    stage_parameter_overrides: Dict[str, Dict[str, Any]] = {}
+    config_parameter_overrides = parameter_overrides or {}
     if parameter_overrides:
-        config = _apply_config_overrides(config, parameter_overrides)
+        config_parameter_overrides, stage_parameter_overrides = _split_stage_parameter_overrides(parameter_overrides)
+
+    if config_parameter_overrides:
+        config = _apply_config_overrides(config, config_parameter_overrides)
 
     # Hydrate configuration with real entities
     try:
@@ -871,6 +977,35 @@ def run_single_simulation(
     _apply_pk_parameter_overrides(hydrated['subject'], hydrated['api'], config.pk)
 
     stage_overrides = _build_stage_overrides_from_config(config)
+    if stage_parameter_overrides:
+        stage_overrides = _merge_stage_overrides(stage_overrides, stage_parameter_overrides)
+
+    run_stage_list: Optional[List[str]] = None
+    run_stage_overrides: Optional[Dict[str, Any]] = None
+    DEFAULT_STAGE_SEQUENCE = ["cfd", "deposition", "pbbm", "pk"]
+    run_section_obj = getattr(config, "run", None)
+    if run_section_obj is not None:
+        stages_value = getattr(run_section_obj, "stages", None)
+        if stages_value:
+            if isinstance(stages_value, (list, tuple, set)):
+                run_stage_list = [str(stage) for stage in stages_value if str(stage)]
+            else:
+                run_stage_list = [str(stages_value)]
+        run_stage_overrides = getattr(run_section_obj, "stage_overrides", None)
+    if run_stage_list and run_stage_list == DEFAULT_STAGE_SEQUENCE and not run_stage_overrides:
+        run_stage_list = None
+    if run_stage_list:
+        selected_workflow = Workflow(
+            name=f"{selected_workflow.name}__custom",
+            stages=tuple(run_stage_list),
+            stage_configs=copy.deepcopy(selected_workflow.stage_configs),
+            population_variability_defaults=selected_workflow.population_variability_defaults,
+        )
+    if run_stage_overrides:
+        try:
+            stage_overrides = _merge_stage_overrides(stage_overrides, dict(run_stage_overrides))
+        except Exception:
+            stage_overrides = _merge_stage_overrides(stage_overrides, run_stage_overrides)
 
     product_name = getattr(hydrated['product'], 'name', config.product.ref or 'product')
 
@@ -973,6 +1108,27 @@ def convert_results_to_dataframes(result: RunResult) -> Dict[str, pd.DataFrame]:
             "plasma_conc": [0.0],
             "compartment": ["central"]
         })
+
+    # PK compartment amounts (central, peripheral, GI, etc.)
+    if pk_data is not None and hasattr(pk_data, "compartments"):
+        time_array = np.asarray(getattr(pk_data, "t", []), dtype=float)
+        compartment_rows: List[pd.DataFrame] = []
+        for comp_name, values in getattr(pk_data, "compartments", {}).items():
+            arr = np.asarray(values, dtype=float).reshape(-1)
+            if time_array.size and arr.size == time_array.size:
+                compartment_rows.append(
+                    pd.DataFrame(
+                        {
+                            "run_id": result.run_id,
+                            "t": time_array,
+                            "amount": arr,
+                            "compartment": comp_name,
+                            "units": "pmol",
+                        }
+                    )
+                )
+        if compartment_rows:
+            frames["pk_compartments"] = pd.concat(compartment_rows, ignore_index=True)
 
     # Regional AUC data from PBPK results and detailed PBPK time series
     pbbk_data = result.pbbk
@@ -1367,6 +1523,13 @@ def calculate_summary_metrics(result: RunResult) -> Dict[str, float]:
         except Exception:
             pass
 
+        pk_metadata = getattr(result.pk, "metadata", {}) or {}
+        pk_metric_map = pk_metadata.get("pk_metrics") if isinstance(pk_metadata, Mapping) else None
+        if isinstance(pk_metric_map, Mapping):
+            for key, value in pk_metric_map.items():
+                if isinstance(value, (int, float, np.integer, np.floating)):
+                    metrics[f"pk_metric_{key}"] = float(value)
+
     if result.deposition is not None and result.deposition.elf_initial_amounts is not None:
         try:
             total_elf = float(np.nansum(result.deposition.elf_initial_amounts))
@@ -1495,8 +1658,13 @@ def run_simulation_with_replicates(
         get_workflow(resolved_workflow_name) if resolved_workflow_name else get_workflow("deposition_pbbm_pk")
     )
     
+    stage_parameter_overrides: Dict[str, Dict[str, Any]] = {}
+    config_parameter_overrides = parameter_overrides or {}
     if parameter_overrides:
-        config = _apply_config_overrides(config, parameter_overrides)
+        config_parameter_overrides, stage_parameter_overrides = _split_stage_parameter_overrides(parameter_overrides)
+
+    if config_parameter_overrides:
+        config = _apply_config_overrides(config, config_parameter_overrides)
 
     logger.info("Starting multi-replicate simulation", 
                 run_id=run_id, 
@@ -1528,6 +1696,8 @@ def run_simulation_with_replicates(
     )
 
     stage_overrides = _build_stage_overrides_from_config(config)
+    if stage_parameter_overrides:
+        stage_overrides = _merge_stage_overrides(stage_overrides, stage_parameter_overrides)
 
     # Generate Inter subject first (if variability enabled)
     inter_rng = create_deterministic_rng(config.run.seed, run_id)

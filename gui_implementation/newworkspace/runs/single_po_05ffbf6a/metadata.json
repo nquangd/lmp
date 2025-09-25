@@ -1,0 +1,119 @@
+{
+  "run_id": "single_po_05ffbf6a",
+  "run_type": "single",
+  "label": "po",
+  "display_label": "po",
+  "parent_run_id": null,
+  "created": "2025-09-23T22:58:29.991614",
+  "status": "completed",
+  "workspace": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace",
+  "run_plan": {
+    "run_type": "single",
+    "run_label": "po",
+    "config_name": "po1",
+    "stages": [
+      "gi_pk",
+      "pk"
+    ],
+    "workspace_bindings": {
+      "api": "bd",
+      "product": "default-oral-template"
+    }
+  },
+  "last_updated": "2025-09-23T22:58:32.467931",
+  "started_at": "2025-09-23T22:58:30.002506",
+  "parameter_overrides": null,
+  "config_path": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace/configs/po1.json",
+  "manifest_index": null,
+  "total_runs": null,
+  "runtime_seconds": 2.465271,
+  "result_files": [
+    "pk_curve.parquet",
+    "pk_compartments.parquet",
+    "regional_auc.parquet",
+    "deposition_bins.parquet",
+    "solver_stats.parquet",
+    "subject_params.parquet"
+  ],
+  "metadata": {
+    "status": "completed",
+    "entities": {
+      "subject": "healthy_reference: 35.6y, 97.8kg, M, BMI=28.9",
+      "api": "BD: MW=430.5\u03bcg/\u03bcmol",
+      "product": "Default Oral Dosing: None",
+      "maneuver": "pMDI_variable_trapezoid: 30.0L/min, 2.0L"
+    },
+    "stage_times": {
+      "gi_pk": 1.081015334
+    },
+    "stage_results": {
+      "gi_pk": {
+        "model": "gi_2c",
+        "metadata": {
+          "pk_model_type": "2c",
+          "gi_model_type": "default",
+          "pk_metrics": {
+            "cmax_ng_mL": 158.65955094988303,
+            "tmax_h": 1.2333333333333334,
+            "auc_ng_h_mL": 450.0720655461045,
+            "tlag_h": 0.06666666666666667,
+            "dose_mg": 0.32904,
+            "formulation": "immediate_release",
+            "dosing_type": "oral",
+            "bioavailability": 0.00013678338972346966
+          },
+          "units": "ng/mL",
+          "source": "gi_pk_stage"
+        }
+      }
+    }
+  },
+  "stage_metrics": {
+    "pk": {
+      "cmax_conc_plasma": 158.65955094988303,
+      "tmax_h": 4440.0,
+      "auc_0_last": 1620259.4359659764
+    },
+    "gi_pk": {
+      "cmax_conc_plasma": 158.65955094988303,
+      "tmax_h": 4440.0,
+      "auc_0_last": 1620259.4359659764,
+      "metadata_pk_metrics_cmax_ng_mL": 158.65955094988303,
+      "metadata_pk_metrics_tmax_h": 1.2333333333333334,
+      "metadata_pk_metrics_auc_ng_h_mL": 450.0720655461045,
+      "metadata_pk_metrics_tlag_h": 0.06666666666666667,
+      "metadata_pk_metrics_dose_mg": 0.32904,
+      "metadata_pk_metrics_bioavailability": 0.00013678338972346966,
+      "runtime_seconds": 1.081015334
+    },
+    "overall": {
+      "pk_cmax": 158.65955094988303,
+      "pk_tmax_h": 4440.0,
+      "pk_auc_0_last": 1620259.4359659764,
+      "pk_metric_cmax_ng_mL": 158.65955094988303,
+      "pk_metric_tmax_h": 1.2333333333333334,
+      "pk_metric_auc_ng_h_mL": 450.0720655461045,
+      "pk_metric_tlag_h": 0.06666666666666667,
+      "pk_metric_dose_mg": 0.32904,
+      "pk_metric_bioavailability": 0.00013678338972346966
+    }
+  },
+  "summary_metrics": {
+    "pk_cmax": 158.65955094988303,
+    "pk_tmax_h": 4440.0,
+    "pk_auc_0_last": 1620259.4359659764,
+    "pk_metric_cmax_ng_mL": 158.65955094988303,
+    "pk_metric_tmax_h": 1.2333333333333334,
+    "pk_metric_auc_ng_h_mL": 450.0720655461045,
+    "pk_metric_tlag_h": 0.06666666666666667,
+    "pk_metric_dose_mg": 0.32904,
+    "pk_metric_bioavailability": 0.00013678338972346966
+  },
+  "stage_order": [
+    "gi_pk",
+    "pk",
+    "overall"
+  ],
+  "exit_code": 0,
+  "completed_at": "2025-09-23T22:58:32.467740"
+}

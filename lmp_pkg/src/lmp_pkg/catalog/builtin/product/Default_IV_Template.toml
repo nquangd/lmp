@@ -1,0 +1,13 @@
+# Template for IV dosing including bolus and infusion
+
+name = "Default IV Dosing"
+description = "Template for IV dosing"
+route = "iv"
+
+[[apis]]
+name = "BD"
+dose_mg = 0.32904
+
+[[apis]]
+name = "FF"
+dose_mg = 0.00962

@@ -1,0 +1,126 @@
+{
+  "run_id": "vt_config_20250923_231755---Subject-1_891471f2",
+  "run_type": "virtual_trial",
+  "label": "config_20250923_231755---Subject-1",
+  "display_label": "config_20250923_231755 \u00b7 Subject 1",
+  "parent_run_id": "vt_config_20250923_231755_bfdb1da6",
+  "created": "2025-09-23T23:18:00.467897",
+  "status": "completed",
+  "workspace": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace",
+  "manifest_index": 0,
+  "total_runs": 4,
+  "task_spec": {
+    "subject_index": 0,
+    "subject_name": "healthy_reference",
+    "api": "BD",
+    "products": [
+      "Default_Oral_Template"
+    ],
+    "seed": 11234,
+    "apply_variability": true,
+    "variability_settings": null,
+    "study_type": "bioequivalence",
+    "study_design": "parallel",
+    "charcoal_block": false,
+    "suppress_et_absorption": false
+  },
+  "run_plan": {
+    "run_type": "virtual_trial",
+    "run_label": null,
+    "config_name": null,
+    "stages": [
+      "gi_pk"
+    ],
+    "virtual_trial": {
+      "n_subjects": 4,
+      "base_seed": 1234,
+      "apply_variability": true,
+      "additional_products": []
+    },
+    "workspace_bindings": {
+      "api": "bd",
+      "product": "default-oral-template"
+    }
+  },
+  "virtual_trial_task": {
+    "subject_index": 0,
+    "subject_name": "healthy_reference",
+    "api": "BD",
+    "products": [
+      "Default_Oral_Template"
+    ],
+    "seed": 11234,
+    "apply_variability": true,
+    "variability_settings": null,
+    "study_type": "bioequivalence",
+    "study_design": "parallel",
+    "charcoal_block": false,
+    "suppress_et_absorption": false
+  },
+  "last_updated": "2025-09-23T23:18:03.485517",
+  "started_at": "2025-09-23T23:18:00.477579",
+  "parameter_overrides": null,
+  "config_path": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace/configs/config_20250923_231755.json",
+  "runtime_seconds": 3.007773,
+  "result_files": [
+    "Default_Oral_Template__pk_curve.parquet",
+    "Default_Oral_Template__pk_compartments.parquet",
+    "Default_Oral_Template__regional_auc.parquet",
+    "Default_Oral_Template__deposition_bins.parquet",
+    "Default_Oral_Template__solver_stats.parquet",
+    "Default_Oral_Template__subject_params.parquet"
+  ],
+  "subject_index": 0,
+  "subject_name": "healthy_reference",
+  "api_name": "BD",
+  "seed": 11234,
+  "apply_variability": true,
+  "products": {
+    "Default_Oral_Template": {
+      "role": "reference",
+      "summary_metrics": {
+        "pk_cmax": 141.94456678231222,
+        "pk_tmax_h": 4260.0,
+        "pk_auc_0_last": 1304085.059608749,
+        "pk_metric_cmax_ng_mL": 141.94456678231222,
+        "pk_metric_tmax_h": 1.1833333333333333,
+        "pk_metric_auc_ng_h_mL": 362.2458498913192,
+        "pk_metric_tlag_h": 0.06666666666666667,
+        "pk_metric_dose_mg": 0.32904,
+        "pk_metric_bioavailability": 0.00011009173653395308
+      },
+      "stage_metrics": {
+        "pk": {
+          "cmax_conc_plasma": 141.94456678231222,
+          "tmax_h": 4260.0,
+          "auc_0_last": 1304085.059608749
+        },
+        "overall": {
+          "pk_cmax": 141.94456678231222,
+          "pk_tmax_h": 4260.0,
+          "pk_auc_0_last": 1304085.059608749,
+          "pk_metric_cmax_ng_mL": 141.94456678231222,
+          "pk_metric_tmax_h": 1.1833333333333333,
+          "pk_metric_auc_ng_h_mL": 362.2458498913192,
+          "pk_metric_tlag_h": 0.06666666666666667,
+          "pk_metric_dose_mg": 0.32904,
+          "pk_metric_bioavailability": 0.00011009173653395308
+        }
+      },
+      "stage_order": [
+        "pk",
+        "overall"
+      ],
+      "result_files": [
+        "Default_Oral_Template__pk_curve.parquet",
+        "Default_Oral_Template__pk_compartments.parquet",
+        "Default_Oral_Template__regional_auc.parquet",
+        "Default_Oral_Template__deposition_bins.parquet",
+        "Default_Oral_Template__solver_stats.parquet",
+        "Default_Oral_Template__subject_params.parquet"
+      ]
+    }
+  },
+  "exit_code": 0,
+  "completed_at": "2025-09-23T23:18:03.485316"
+}

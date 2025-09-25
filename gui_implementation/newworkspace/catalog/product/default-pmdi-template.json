@@ -1,0 +1,20 @@
+{
+  "name": "Default_pMDI_Template",
+  "ref": "Default_pMDI_Template",
+  "overrides": {
+    "apis": {
+      "BD": {
+        "ref": "BD",
+        "dose_ug": 329.04,
+        "dose_pg": 329040000.0,
+        "usp_depo_fraction": 41.26,
+        "mmad": 3.53,
+        "gsd": 1.61
+      }
+    }
+  },
+  "id": "default-pmdi-template",
+  "category": "product",
+  "updated": "2025-09-24T11:47:36.588351",
+  "created": "2025-09-24T11:47:36.588351"
+}

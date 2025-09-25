@@ -8,8 +8,9 @@ Uses Pydantic EntityRef models for configuration management.
 
 import sys
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Iterable, Tuple
 import toml
+import copy
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
@@ -28,6 +29,11 @@ try:
 except Exception:
     CATALOG_AVAILABLE = False
     app_api = None
+
+try:
+    from lmp_pkg.catalog.builtin_loader import BuiltinDataLoader
+except Exception:
+    BuiltinDataLoader = None
 
 CATALOG_ROOT = Path(__file__).parent.parent / "lmp_pkg" / "src" / "lmp_pkg" / "catalog" / "builtin"
 
@@ -324,18 +330,73 @@ class PopulationTabWidget(QWidget):
         self.current_inhalation = None
         self.current_lung_geometry = None
         self.current_gi_tract = None
+        self.current_gi_data_key = None
 
         # Variability configurations
         self.subject_variability_config = None
         self.inhalation_variability_config = None
         self.lung_variability_config = None
         self.gi_variability_config = None
+        self.pk_variability_config = None
 
         # Track saved APIs for GI dropdown
-        self.saved_apis = []
+        self.saved_apis: List[str] = []
+        self.saved_api_refs: List[str] = []
+        self.saved_api_mapping: Dict[str, str] = {}
+        self._builtin_api_names: List[str] = []
+        if BuiltinDataLoader is not None:
+            try:
+                self._builtin_api_names = BuiltinDataLoader().get_available_api_names()
+            except Exception:
+                self._builtin_api_names = []
 
         self.init_ui()
         self.load_default_data()
+        self._update_pk_variability_controls()
+
+    # ------------------------------------------------------------------
+    # Helpers for loading/merging data
+
+    @staticmethod
+    def _merge_dicts(base: Dict[str, Any], overrides: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        result = copy.deepcopy(base)
+        if overrides:
+            for key, value in overrides.items():
+                if isinstance(value, dict) and isinstance(result.get(key), dict):
+                    result[key] = PopulationTabWidget._merge_dicts(result[key], value)
+                else:
+                    result[key] = copy.deepcopy(value)
+        return result
+
+    @staticmethod
+    def _category_dir(category: str) -> str:
+        mapping = {
+            "subject": "subject",
+            "maneuver": "inhalation",
+            "lung_geometry": "lung_geometry",
+            "gi_tract": "gi_tract",
+        }
+        return mapping.get(category, category)
+
+    def _load_builtin_data(self, category: str, ref: str) -> Dict[str, Any]:
+        directory = self._category_dir(category)
+        file_path = CATALOG_ROOT / directory / f"{ref}.toml"
+        if not file_path.exists():
+            return {}
+        try:
+            with open(file_path, 'rb') as handle:
+                try:
+                    import tomllib
+                except ImportError:  # Python <3.11
+                    import tomli as tomllib
+                return tomllib.load(handle)
+        except Exception:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as handle:
+                    return toml.load(handle)
+            except Exception:
+                return {}
+
 
     def init_ui(self):
         """Initialize the user interface."""
@@ -542,6 +603,29 @@ class PopulationTabWidget(QWidget):
         gi_group.setLayout(gi_layout)
         layout.addWidget(gi_group)
 
+        # PK Variability section
+        pk_group = QGroupBox("PK Variability")
+        pk_layout = QVBoxLayout()
+
+        pk_info = QLabel("Configure pharmacokinetic variability factors per API.")
+        pk_info.setWordWrap(True)
+        pk_layout.addWidget(pk_info)
+
+        pk_controls = QHBoxLayout()
+        self.pk_variability_checkbox = QCheckBox("Enable PK Variability")
+        self.pk_variability_checkbox.toggled.connect(self.on_pk_variability_toggled)
+        pk_controls.addWidget(self.pk_variability_checkbox)
+
+        self.pk_variability_btn = QPushButton("Configure Variability...")
+        self.pk_variability_btn.clicked.connect(self.open_pk_variability_window)
+        self.pk_variability_btn.setEnabled(False)
+        pk_controls.addWidget(self.pk_variability_btn)
+        pk_controls.addStretch()
+        pk_layout.addLayout(pk_controls)
+
+        pk_group.setLayout(pk_layout)
+        layout.addWidget(pk_group)
+
         widget.setLayout(layout)
         return widget
 
@@ -554,6 +638,100 @@ class PopulationTabWidget(QWidget):
         self.refresh_inhalation_list()
         self.refresh_lung_geometry_list()
         self.refresh_gi_tract_list()
+
+    # ------------------------------------------------------------------
+    # External loading helpers
+
+    def load_subject_entry(self, ref: str, overrides: Optional[Dict[str, Any]] = None) -> None:
+        base = self._load_builtin_data("subject", ref)
+        merged = self._merge_dicts(base, overrides)
+        variability = merged.pop("variability", None)
+        if "variability_overrides" in merged:
+            variability = merged.pop("variability_overrides")
+        self.subject_table.populate_from_toml(merged)
+        self.current_subject = ref
+        self.subject_variability_checkbox.blockSignals(True)
+        self.subject_variability_checkbox.setChecked(bool(variability))
+        self.subject_variability_checkbox.blockSignals(False)
+        self.subject_variability_btn.setEnabled(bool(variability))
+        self.subject_variability_config = variability
+
+        pk_variability = merged.pop("pk_variability", None)
+        self.pk_variability_config = pk_variability
+        self.pk_variability_checkbox.blockSignals(True)
+        self.pk_variability_checkbox.setChecked(bool(pk_variability))
+        self.pk_variability_checkbox.blockSignals(False)
+        self._update_pk_variability_controls()
+
+    def load_maneuver_entry(self, ref: str, overrides: Optional[Dict[str, Any]] = None) -> None:
+        base = self._load_builtin_data("maneuver", ref)
+        merged = self._merge_dicts(base, overrides)
+        variability = merged.pop("variability", None)
+        if "variability_overrides" in merged:
+            variability = merged.pop("variability_overrides")
+        self.inhalation_table.populate_from_toml(merged)
+        self.current_inhalation = ref
+        self.inhalation_combo.blockSignals(True)
+        index = self.inhalation_combo.findText(ref)
+        if index >= 0:
+            self.inhalation_combo.setCurrentIndex(index)
+        self.inhalation_combo.blockSignals(False)
+        self.inhalation_variability_checkbox.blockSignals(True)
+        self.inhalation_variability_checkbox.setChecked(bool(variability))
+        self.inhalation_variability_checkbox.blockSignals(False)
+        self.inhalation_variability_btn.setEnabled(bool(variability))
+        self.inhalation_variability_config = variability
+
+    def load_lung_geometry_entry(self, ref: str, overrides: Optional[Dict[str, Any]] = None) -> None:
+        base = self._load_builtin_data("lung_geometry", ref)
+        merged = self._merge_dicts(base, overrides)
+        variability = merged.pop("variability", None)
+        if "variability_overrides" in merged:
+            variability = merged.pop("variability_overrides")
+        generations = merged.get("generations") if isinstance(merged.get("generations"), list) else []
+        self.lung_geometry_table.populate_from_generations(generations)
+        self.current_lung_geometry = ref
+        self.lung_geometry_combo.blockSignals(True)
+        index = self.lung_geometry_combo.findText(ref)
+        if index >= 0:
+            self.lung_geometry_combo.setCurrentIndex(index)
+        self.lung_geometry_combo.blockSignals(False)
+        self.lung_variability_checkbox.blockSignals(True)
+        self.lung_variability_checkbox.setChecked(bool(variability))
+        self.lung_variability_checkbox.blockSignals(False)
+        self.lung_variability_btn.setEnabled(bool(variability))
+        self.lung_variability_config = variability
+
+    def load_gi_entry(self, ref: str, overrides: Optional[Dict[str, Any]] = None) -> None:
+        base = self._load_builtin_data("gi_tract", "default")
+        merged = self._merge_dicts(base, overrides)
+        variability = merged.pop("variability", None)
+        if "variability_overrides" in merged:
+            variability = merged.pop("variability_overrides")
+        gi_type = ref
+        target_api = gi_type
+        if target_api in self.saved_api_mapping:
+            target_api = self.saved_api_mapping[target_api]
+        if target_api and target_api.lower() == "default":
+            if self.saved_api_refs:
+                target_api = self.saved_api_refs[0]
+            elif self.saved_apis and self.saved_apis[0] in self.saved_api_mapping:
+                target_api = self.saved_api_mapping[self.saved_apis[0]]
+            elif self._builtin_api_names:
+                target_api = self._builtin_api_names[0]
+        self.gi_table.populate_from_gi_toml(merged, target_api or gi_type)
+        self.current_gi_tract = gi_type
+        self.current_gi_data_key = target_api or gi_type
+        self.gi_combo.blockSignals(True)
+        index = self.gi_combo.findText(ref)
+        if index >= 0:
+            self.gi_combo.setCurrentIndex(index)
+        self.gi_combo.blockSignals(False)
+        self.gi_variability_checkbox.blockSignals(True)
+        self.gi_variability_checkbox.setChecked(bool(variability))
+        self.gi_variability_checkbox.blockSignals(False)
+        self.gi_variability_btn.setEnabled(bool(variability))
+        self.gi_variability_config = variability
 
     def load_subject_data(self):
         """Load subject data from healthy_reference.toml."""
@@ -577,6 +755,8 @@ class PopulationTabWidget(QWidget):
                 self.current_subject = "healthy_reference"
         except Exception as e:
             print(f"Error loading subject data: {e}")
+        finally:
+            self._update_pk_variability_controls()
 
     def refresh_inhalation_list(self):
         """Refresh inhalation maneuver dropdown list."""
@@ -707,6 +887,11 @@ class PopulationTabWidget(QWidget):
         # Add variability configuration if enabled
         if self.subject_variability_checkbox.isChecked() and self.subject_variability_config:
             overrides["variability"] = self.subject_variability_config
+
+        if self.pk_variability_checkbox.isChecked() and self.pk_variability_config:
+            overrides["pk_variability"] = copy.deepcopy(self.pk_variability_config)
+        elif "pk_variability" in overrides:
+            overrides.pop("pk_variability")
 
         # Create EntityRef with reference and parameter overrides
         entity_ref = EntityRef(
@@ -856,24 +1041,68 @@ class PopulationTabWidget(QWidget):
         if dialog.exec() == QDialog.Accepted:
             self.gi_variability_config = dialog.get_variability_config()
 
+    def on_pk_variability_toggled(self, checked: bool) -> None:
+        """Handle PK variability checkbox toggle."""
+        self.pk_variability_btn.setEnabled(checked)
+        if checked and self.pk_variability_config is None:
+            if not self.open_pk_variability_window():
+                self.pk_variability_checkbox.blockSignals(True)
+                self.pk_variability_checkbox.setChecked(False)
+                self.pk_variability_checkbox.blockSignals(False)
+                self.pk_variability_btn.setEnabled(False)
+        self._update_pk_variability_controls()
+
+    def open_pk_variability_window(self) -> bool:
+        """Open PK variability configuration dialog."""
+        available_apis = self._available_pk_api_names()
+        if not available_apis:
+            QMessageBox.information(
+                self,
+                "PK Variability",
+                "Configure and save at least one API before editing PK variability."
+            )
+            return False
+        variability_file = "Variability_default.toml"
+        dialog = PKVariabilityDialog(
+            self,
+            available_apis=available_apis,
+            variability_file=variability_file,
+            initial_config=self.pk_variability_config,
+        )
+        result = dialog.exec()
+        if result == QDialog.Accepted:
+            self.pk_variability_config = dialog.get_variability_config()
+            self._update_pk_variability_controls()
+            return True
+        return False
+
     def refresh_gi_tract_list(self):
         """Refresh GI tract dropdown list."""
         try:
-            # Always include Default option
-            options = ["Default"]
+            previous_selection = self.current_gi_tract or self.gi_combo.currentText()
 
-            # Add options for saved APIs (BD, GP, FF)
-            # These should only appear if the corresponding API has been saved in API tab
+            options: List[str] = ["Default"]
             for api_name in self.saved_apis:
-                if api_name in ["BD", "GP", "FF"]:
+                if api_name and api_name not in options:
                     options.append(api_name)
 
+            self.gi_combo.blockSignals(True)
             self.gi_combo.clear()
             self.gi_combo.addItems(options)
 
-            # Load default GI tract data
-            if options:
-                self.load_gi_tract_data()
+            if previous_selection in options:
+                target_selection = previous_selection
+            else:
+                target_selection = options[0] if options else ""
+
+            if target_selection:
+                index = self.gi_combo.findText(target_selection)
+                if index >= 0:
+                    self.gi_combo.setCurrentIndex(index)
+            self.gi_combo.blockSignals(False)
+
+            if target_selection:
+                self.load_gi_tract_data(target_selection)
 
         except Exception as e:
             print(f"Error loading GI tract list: {e}")
@@ -887,9 +1116,13 @@ class PopulationTabWidget(QWidget):
                 gi_type = self.gi_combo.currentText()
 
             if not gi_type:
+                self.gi_table.setRowCount(0)
+                self.current_gi_tract = None
+                self.current_gi_data_key = None
                 return
 
-            # Load from default.toml
+            desired_key = self.saved_api_mapping.get(gi_type, gi_type)
+
             gi_file = CATALOG_ROOT / "gi_tract" / "default.toml"
             if gi_file.exists():
                 try:
@@ -901,8 +1134,13 @@ class PopulationTabWidget(QWidget):
                     with open(gi_file, 'rb') as f:
                         data = tomllib.load(f)
 
-                # Extract data for selected type
-                self.gi_table.populate_from_gi_toml(data, gi_type)
+                resolved_key = self._resolve_gi_data_key(data, desired_key, gi_type)
+                if resolved_key:
+                    self.gi_table.populate_from_gi_toml(data, resolved_key)
+                    self.current_gi_data_key = resolved_key
+                else:
+                    self.gi_table.setRowCount(0)
+                    self.current_gi_data_key = None
                 self.current_gi_tract = gi_type
 
         except Exception as e:
@@ -926,8 +1164,11 @@ class PopulationTabWidget(QWidget):
             overrides["variability"] = self.gi_variability_config
 
         # Create EntityRef with reference and parameter overrides
+        target_ref = self.saved_api_mapping.get(
+            self.current_gi_tract, self.current_gi_data_key or self.current_gi_tract
+        )
         entity_ref = EntityRef(
-            ref=f"gi_tract_{self.current_gi_tract}",
+            ref=f"gi_tract_{target_ref}",
             overrides=overrides
         )
 
@@ -935,16 +1176,114 @@ class PopulationTabWidget(QWidget):
         config_data = entity_ref.model_dump()
 
         # Add name for backward compatibility
-        config_data["name"] = self.current_gi_tract
+        config_data["name"] = target_ref
 
         self.config_updated.emit("gi_tract", config_data)
 
         QMessageBox.information(self, "Saved", f"GI Tract '{self.current_gi_tract}' saved using Pydantic model.")
 
-    def update_saved_apis(self, saved_apis: List[str]):
-        """Update the list of saved APIs to determine GI dropdown options."""
-        self.saved_apis = saved_apis
+    def update_saved_apis(
+        self,
+        saved_api_info: Iterable[Dict[str, Any]],
+        *,
+        replace_existing: bool = False,
+    ) -> None:
+        """Update the list of saved APIs (display and refs) for GI/PK editors."""
+        prev_mapping = {} if replace_existing else (getattr(self, "saved_api_mapping", {}) or {})
+
+        display_names: List[str] = []
+        refs: List[str] = []
+        mapping: Dict[str, str] = {}
+        for info in saved_api_info or []:
+            if not isinstance(info, dict):
+                continue
+            name = info.get("name")
+            ref = info.get("ref") or prev_mapping.get(str(name), name)
+            if name and str(name) not in display_names:
+                display_names.append(str(name))
+            if ref and str(ref) not in refs:
+                refs.append(str(ref))
+            if name and ref:
+                mapping[str(name)] = str(ref)
+
+        if not mapping and prev_mapping and not replace_existing:
+            mapping = prev_mapping
+        if not display_names and prev_mapping and not replace_existing:
+            display_names = list(prev_mapping.keys())
+        if not refs and prev_mapping and not replace_existing:
+            refs = list(dict.fromkeys(prev_mapping.values()))
+
+        self.saved_apis = display_names
+        self.saved_api_refs = refs
+        self.saved_api_mapping = mapping
         self.refresh_gi_tract_list()
+        self._update_pk_variability_controls()
+
+    def _available_pk_api_names(self) -> List[str]:
+        names: List[str] = []
+        preferred_sources = self.saved_api_refs or self.saved_apis
+        for api_name in preferred_sources:
+            if api_name and api_name not in names:
+                names.append(api_name)
+
+        if not names and self.pk_variability_config:
+            for payload in self.pk_variability_config.values():
+                if isinstance(payload, dict):
+                    for api_name in payload.keys():
+                        if api_name and api_name not in names:
+                            names.append(api_name)
+
+        return names
+
+    def _update_pk_variability_controls(self) -> None:
+        """Enable or disable PK variability controls based on available APIs/config."""
+        has_api_targets = bool(self.saved_api_refs or self.saved_apis)
+        has_existing_config = bool(self.pk_variability_config)
+        can_configure = has_api_targets or has_existing_config
+
+        self.pk_variability_checkbox.setEnabled(True)
+        if not can_configure:
+            self.pk_variability_checkbox.blockSignals(True)
+            self.pk_variability_checkbox.setChecked(False)
+            self.pk_variability_checkbox.blockSignals(False)
+            self.pk_variability_btn.setEnabled(False)
+            self.pk_variability_btn.setToolTip(
+                "Save at least one API in the API/Product tabs to configure PK variability."
+            )
+        else:
+            self.pk_variability_btn.setEnabled(self.pk_variability_checkbox.isChecked())
+            self.pk_variability_btn.setToolTip("")
+
+    def _resolve_gi_data_key(
+        self,
+        data: Dict[str, Any],
+        desired_key: Optional[str],
+        display_key: str,
+    ) -> Optional[str]:
+        available_keys: List[str] = []
+        for section in ("gi_area", "gi_tg", "gi_vol"):
+            section_data = data.get(section)
+            if isinstance(section_data, dict):
+                for key in section_data.keys():
+                    if key and key not in available_keys:
+                        available_keys.append(key)
+
+        if desired_key and desired_key in available_keys:
+            return desired_key
+
+        if display_key and display_key in available_keys:
+            return display_key
+
+        if display_key.lower() == "default":
+            for api_name in self.saved_api_refs:
+                if api_name in available_keys:
+                    return api_name
+            for api_name in self.saved_apis:
+                mapped = self.saved_api_mapping.get(api_name, api_name)
+                if mapped in available_keys:
+                    return mapped
+
+        return available_keys[0] if available_keys else None
 
 
 class VariabilityConfigDialog(QDialog):
@@ -1024,10 +1363,167 @@ class VariabilityConfigDialog(QDialog):
 
                 self.variability_table.populate_from_variability_toml(data)
             else:
-                QMessageBox.warning(self, "File Not Found", f"Variability file not found: {self.variability_file}")
+                self._load_fallback_variability()
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error loading variability data: {str(e)}")
+
+    def _load_fallback_variability(self) -> None:
+        """Populate variability table when no builtin variability file exists."""
+        if self._apply_existing_variability_config():
+            return
+
+        base_ref = self._resolve_base_reference()
+        fallback_path = None
+        if base_ref:
+            candidate = CATALOG_ROOT / self.category / f"Variability_{base_ref}.toml"
+            if candidate.exists():
+                fallback_path = candidate
+
+        if fallback_path is None:
+            default_refs = {
+                "subject": "healthy_reference",
+                "inhalation": "pMDI_variable_trapezoid",
+                "gi_tract": "default",
+            }
+            default_ref = default_refs.get(self.category)
+            if default_ref and default_ref != base_ref:
+                candidate = CATALOG_ROOT / self.category / f"Variability_{default_ref}.toml"
+                if candidate.exists():
+                    fallback_path = candidate
+                    base_ref = default_ref
+
+        if fallback_path is not None:
+            try:
+                try:
+                    import tomllib  # type: ignore[attr-defined]
+                except ImportError:  # pragma: no cover - Python < 3.11
+                    import tomli as tomllib  # type: ignore
+                with open(fallback_path, 'rb') as handle:
+                    data = tomllib.load(handle)
+                self.variability_table.populate_from_variability_toml(data)
+                self._ensure_variability_checkbox_enabled()
+                QMessageBox.information(
+                    self,
+                    "Variability",
+                    f"Loaded fallback variability from {base_ref}."
+                )
+                return
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "Variability",
+                    f"Could not load fallback variability: {exc}"
+                )
+
+        parameter_names = self._collect_parameter_names()
+        if isinstance(self.variability_table, StandardVariabilityTable) and parameter_names:
+            self.variability_table.populate_from_parameter_names(parameter_names)
+            self._ensure_variability_checkbox_enabled()
+            QMessageBox.information(
+                self,
+                "Variability",
+                "No variability template found; starting with default entries."
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "File Not Found",
+                f"Variability file not found: {self.variability_file}"
+            )
+            self._disable_variability_toggle()
+
+    def _apply_existing_variability_config(self) -> bool:
+        config_map = {
+            "subject": "subject_variability_config",
+            "inhalation": "inhalation_variability_config",
+            "gi_tract": "gi_variability_config",
+            "pk": "pk_variability_config",
+        }
+        attr = config_map.get(self.category)
+        if attr:
+            config = getattr(self.parent_widget, attr, None)
+            if isinstance(config, dict) and config:
+                self.variability_table.populate_from_variability_toml(config)
+                self._ensure_variability_checkbox_enabled()
+                return True
+        return False
+
+    def _resolve_base_reference(self) -> Optional[str]:
+        mapping = {
+            "subject": getattr(self.parent_widget, "current_subject", None),
+            "inhalation": getattr(self.parent_widget, "current_inhalation", None),
+            "gi_tract": getattr(self.parent_widget, "current_gi_tract", None),
+        }
+        return mapping.get(self.category)
+
+    def _disable_variability_toggle(self) -> None:
+        checkbox_map = {
+            "subject": "subject_variability_checkbox",
+            "inhalation": "inhalation_variability_checkbox",
+            "gi_tract": "gi_variability_checkbox",
+            "pk": "pk_variability_checkbox",
+        }
+        attr = checkbox_map.get(self.category)
+        if not attr:
+            return
+        checkbox = getattr(self.parent_widget, attr, None)
+        if checkbox is None:
+            return
+        checkbox.blockSignals(True)
+        checkbox.setChecked(False)
+        checkbox.blockSignals(False)
+        checkbox.setEnabled(False)
+
+    def _ensure_variability_checkbox_enabled(self) -> None:
+        checkbox_map = {
+            "subject": "subject_variability_checkbox",
+            "inhalation": "inhalation_variability_checkbox",
+            "gi_tract": "gi_variability_checkbox",
+            "pk": "pk_variability_checkbox",
+        }
+        attr = checkbox_map.get(self.category)
+        if not attr:
+            return
+        checkbox = getattr(self.parent_widget, attr, None)
+        if checkbox is not None:
+            checkbox.setEnabled(True)
+
+    def _collect_parameter_names(self) -> List[str]:
+        """Gather parameter names for the active category to seed variability rows."""
+        try:
+            if self.category == "subject":
+                table = getattr(self.parent_widget, "subject_table", None)
+                values = table.get_values() if table else {}
+                return [name for name in values.keys() if isinstance(name, str)]
+
+            if self.category == "inhalation":
+                table = getattr(self.parent_widget, "inhalation_table", None)
+                values = table.get_values() if table else {}
+                return [
+                    name for name in values.keys()
+                    if isinstance(name, str) and name != "tabulated_flow_profile"
+                ]
+
+            if self.category == "gi_tract":
+                table = getattr(self.parent_widget, "gi_table", None)
+                if table and hasattr(table, "get_parameter_keys"):
+                    return table.get_parameter_keys()
+
+            if self.category == "pk":
+                return [
+                    "clearance_L_h",
+                    "hepatic_extraction",
+                    "volume_central_L",
+                    "q_inter_L_h",
+                    "ka_h",
+                    "f_bioavail",
+                ]
+
+        except Exception:
+            pass
+        return []
+
 
     def accept(self):
         """Save configuration and accept dialog."""
@@ -1053,68 +1549,84 @@ class StandardVariabilityTable(QTableWidget):
 
     def populate_from_variability_toml(self, data: Dict[str, Any]):
         """Populate table from variability TOML data."""
-        # Filter out non-variability parameters
         variability_params = {}
         for key, value in data.items():
-            if isinstance(value, list) and len(value) == 5:  # Variability structure
+            if isinstance(value, list) and len(value) == 5:
                 variability_params[key] = value
 
         self.setRowCount(len(variability_params))
 
         for row, (param_name, param_values) in enumerate(variability_params.items()):
-            # Parameter name (read-only)
-            param_item = QTableWidgetItem(param_name)
-            param_item.setFlags(param_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.setItem(row, 0, param_item)
+            self._populate_row(row, param_name, param_values)
 
-            # Create widget for variability values
-            value_widget = QWidget()
-            value_layout = QHBoxLayout()
-            value_layout.setContentsMargins(5, 0, 5, 0)
+    def populate_from_parameter_names(self, parameter_names: Iterable[str]) -> None:
+        """Populate table with default variability rows for provided parameters."""
+        names = [str(name) for name in parameter_names if name]
+        if not names:
+            self.setRowCount(0)
+            return
 
-            # Inter sigma
-            inter_sigma_edit = QLineEdit(str(param_values[0]))
-            inter_sigma_edit.setMaximumWidth(60)
-            value_layout.addWidget(QLabel("Inter σ:"))
-            value_layout.addWidget(inter_sigma_edit)
+        unique_names = sorted(dict.fromkeys(names))
+        self.setRowCount(len(unique_names))
+        for row, name in enumerate(unique_names):
+            self._populate_row(row, name, None)
 
-            # Inter distribution
-            inter_dist_combo = QComboBox()
-            inter_dist_combo.addItems(["lognormal", "normal", "uniform", "constant"])
-            inter_dist_combo.setCurrentText(str(param_values[1]))
-            inter_dist_combo.setMaximumWidth(100)
-            value_layout.addWidget(inter_dist_combo)
+    def _populate_row(self, row: int, param_name: str, param_values: Optional[Iterable[Any]]) -> None:
+        """Populate a single table row with controls for variability editing."""
+        defaults: List[Any] = [0.0, "lognormal", 0.0, "lognormal", ""]
+        if param_values is not None:
+            values = list(defaults)
+            for idx, value in enumerate(param_values):
+                if idx < len(values) and value not in (None, ""):
+                    values[idx] = value
+        else:
+            values = defaults
 
-            # Intra sigma
-            intra_sigma_edit = QLineEdit(str(param_values[2]))
-            intra_sigma_edit.setMaximumWidth(60)
-            value_layout.addWidget(QLabel("Intra σ:"))
-            value_layout.addWidget(intra_sigma_edit)
+        param_item = QTableWidgetItem(param_name)
+        param_item.setFlags(param_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.setItem(row, 0, param_item)
 
-            # Intra distribution
-            intra_dist_combo = QComboBox()
-            intra_dist_combo.addItems(["lognormal", "normal", "uniform", "constant"])
-            intra_dist_combo.setCurrentText(str(param_values[3]))
-            intra_dist_combo.setMaximumWidth(100)
-            value_layout.addWidget(intra_dist_combo)
+        value_widget = QWidget()
+        value_layout = QHBoxLayout()
+        value_layout.setContentsMargins(5, 0, 5, 0)
 
-            # Dependent field
-            dep_field_edit = QLineEdit(str(param_values[4]))
-            dep_field_edit.setMaximumWidth(100)
-            value_layout.addWidget(QLabel("Dep:"))
-            value_layout.addWidget(dep_field_edit)
+        inter_sigma_edit = QLineEdit(str(values[0]))
+        inter_sigma_edit.setMaximumWidth(60)
+        value_layout.addWidget(QLabel("Inter σ:"))
+        value_layout.addWidget(inter_sigma_edit)
 
-            value_layout.addStretch()
-            value_widget.setLayout(value_layout)
+        inter_dist_combo = QComboBox()
+        inter_dist_combo.addItems(["lognormal", "normal", "uniform", "constant"])
+        inter_dist_combo.setCurrentText(str(values[1]))
+        inter_dist_combo.setMaximumWidth(100)
+        value_layout.addWidget(inter_dist_combo)
 
-            # Store widgets for later retrieval
-            value_widget.inter_sigma = inter_sigma_edit
-            value_widget.inter_dist = inter_dist_combo
-            value_widget.intra_sigma = intra_sigma_edit
-            value_widget.intra_dist = intra_dist_combo
-            value_widget.dep_field = dep_field_edit
+        intra_sigma_edit = QLineEdit(str(values[2]))
+        intra_sigma_edit.setMaximumWidth(60)
+        value_layout.addWidget(QLabel("Intra σ:"))
+        value_layout.addWidget(intra_sigma_edit)
 
-            self.setCellWidget(row, 1, value_widget)
+        intra_dist_combo = QComboBox()
+        intra_dist_combo.addItems(["lognormal", "normal", "uniform", "constant"])
+        intra_dist_combo.setCurrentText(str(values[3]))
+        intra_dist_combo.setMaximumWidth(100)
+        value_layout.addWidget(intra_dist_combo)
+
+        dep_field_edit = QLineEdit(str(values[4]))
+        dep_field_edit.setMaximumWidth(120)
+        value_layout.addWidget(QLabel("Dependent Field:"))
+        value_layout.addWidget(dep_field_edit)
+
+        value_layout.addStretch()
+
+        value_widget.inter_sigma = inter_sigma_edit
+        value_widget.inter_dist = inter_dist_combo
+        value_widget.intra_sigma = intra_sigma_edit
+        value_widget.intra_dist = intra_dist_combo
+        value_widget.dep_field = dep_field_edit
+
+        value_widget.setLayout(value_layout)
+        self.setCellWidget(row, 1, value_widget)
 
     def get_variability_values(self) -> Dict[str, Any]:
         """Get all variability values from table."""
@@ -1320,6 +1832,16 @@ class GITractTable(QTableWidget):
         return values
 
 
+    def get_parameter_keys(self) -> List[str]:
+        """Return the parameter labels shown in the table."""
+        keys: List[str] = []
+        for row in range(self.rowCount()):
+            item = self.item(row, 0)
+            if item:
+                keys.append(item.text())
+        return keys
+
+
 class GIVariabilityConfigDialog(QDialog):
     """Dialog for configuring GI tract variability parameters."""
 
@@ -1400,6 +1922,264 @@ class GIVariabilityConfigDialog(QDialog):
         return self.variability_config
 
 
+class PKVariabilityDialog(QDialog):
+    """Dialog for configuring per-API PK variability parameters."""
+
+    def __init__(
+        self,
+        parent,
+        available_apis: Iterable[str],
+        variability_file: str = "Variability_default.toml",
+        initial_config: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(parent)
+        self.parent_widget = parent
+        self.available_apis = [name for name in available_apis if name]
+        self.variability_file = variability_file
+        self.initial_config = copy.deepcopy(initial_config) if initial_config else None
+        self.variability_config: Optional[Dict[str, Any]] = None
+        self.setWindowTitle("PK Variability Configuration")
+        self.setGeometry(200, 200, 900, 600)
+        self.setModal(True)
+
+        self.init_ui()
+        self.load_variability_data()
+
+    def init_ui(self):
+        layout = QVBoxLayout()
+
+        header = QLabel("Configure inter/intra-subject PK variability by API")
+        header.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        layout.addWidget(header)
+
+        info = QLabel(
+            "Each row captures [inter_sigma, inter_dist, intra_sigma, intra_dist] for an API-specific parameter."
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        self.variability_table = PKVariabilityTable(self.available_apis)
+        layout.addWidget(self.variability_table)
+
+        buttons = QHBoxLayout()
+        self.save_btn = QPushButton("Save")
+        self.save_btn.clicked.connect(self.accept)
+        buttons.addWidget(self.save_btn)
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(cancel_btn)
+        buttons.addStretch()
+        layout.addLayout(buttons)
+
+        self.setLayout(layout)
+
+    def load_variability_data(self) -> None:
+        data: Dict[str, Any] = {}
+        file_path = CATALOG_ROOT / "pk" / self.variability_file
+        if file_path.exists():
+            try:
+                try:
+                    import tomllib  # type: ignore[attr-defined]
+                except ImportError:  # pragma: no cover - Python < 3.11
+                    import tomli as tomllib  # type: ignore
+                with open(file_path, 'rb') as handle:
+                    raw = tomllib.load(handle)
+                if self.available_apis:
+                    data = {
+                        param: {
+                            api: spec
+                            for api, spec in payload.items()
+                            if api in self.available_apis
+                        }
+                        for param, payload in raw.items()
+                        if isinstance(payload, dict)
+                    }
+                else:
+                    data = {}
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "Variability",
+                    f"Could not load builtin PK variability: {exc}"
+                )
+
+        self.variability_table.populate_from_data(data, self.initial_config)
+
+        has_rows = self.variability_table.rowCount() > 0
+        self.save_btn.setEnabled(has_rows)
+        if not has_rows:
+            QMessageBox.information(
+                self,
+                "PK Variability",
+                "No PK variability entries available. Save APIs in the API & Products tab first to configure PK variability."
+            )
+
+    def accept(self) -> None:
+        self.variability_config = self.variability_table.get_variability_values()
+        super().accept()
+
+    def get_variability_config(self) -> Dict[str, Any]:
+        return self.variability_config or {}
+
+
+class PKVariabilityTable(QTableWidget):
+    """Table widget for editing PK variability per API."""
+
+    PARAMETERS = [
+        "clearance_L_h",
+        "hepatic_extraction",
+        "volume_central_L",
+        "q_inter_L_h",
+        "ka_h",
+        "f_bioavail",
+    ]
+
+    def __init__(self, api_names: Iterable[str]):
+        super().__init__()
+        self._api_names = [name for name in api_names if name]
+        self._row_mapping: List[Tuple[str, str]] = []
+        self.setColumnCount(7)
+        self.setHorizontalHeaderLabels([
+            "Parameter",
+            "API",
+            "Inter σ",
+            "Inter Dist",
+            "Intra σ",
+            "Intra Dist",
+            "Dependent"
+        ])
+        self.verticalHeader().setVisible(False)
+        self.setAlternatingRowColors(True)
+
+    def populate_from_data(
+        self,
+        base_data: Optional[Dict[str, Any]],
+        overrides: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        base_data = base_data or {}
+        overrides = overrides or {}
+
+        all_params: List[str] = list(dict.fromkeys(self.PARAMETERS + list(base_data.keys()) + list(overrides.keys())))
+        all_params = [param for param in all_params if param]
+
+        all_apis: List[str] = []
+        for name in self._api_names:
+            if name and name not in all_apis:
+                all_apis.append(name)
+
+        for source in (base_data, overrides):
+            for payload in source.values():
+                if isinstance(payload, dict):
+                    for api_name in payload.keys():
+                        if api_name and api_name not in all_apis:
+                            all_apis.append(api_name)
+
+        if not all_params or not all_apis:
+            self.setRowCount(0)
+            self._row_mapping = []
+            return
+
+        rows = []
+        for param in all_params:
+            payload_base = base_data.get(param, {}) if isinstance(base_data.get(param), dict) else {}
+            payload_override = overrides.get(param, {}) if isinstance(overrides.get(param), dict) else {}
+            for api_name in all_apis:
+                if self._api_names and api_name not in self._api_names:
+                    continue
+                spec = payload_override.get(api_name)
+                if spec is None:
+                    spec = payload_base.get(api_name)
+                rows.append((param, api_name, spec))
+
+        self.setRowCount(len(rows))
+        self._row_mapping = []
+
+        for row_index, (param, api_name, spec) in enumerate(rows):
+            self._row_mapping.append((param, api_name))
+
+            param_item = QTableWidgetItem(param)
+            param_item.setFlags(param_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.setItem(row_index, 0, param_item)
+
+            api_item = QTableWidgetItem(api_name)
+            api_item.setFlags(api_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.setItem(row_index, 1, api_item)
+
+            values = self._normalize_spec(spec)
+
+            inter_sigma_edit = QLineEdit(str(values[0]))
+            inter_sigma_edit.setMaximumWidth(80)
+            self.setCellWidget(row_index, 2, inter_sigma_edit)
+
+            inter_dist_combo = QComboBox()
+            inter_dist_combo.addItems(["lognormal", "normal", "uniform", "constant"])
+            inter_dist_combo.setCurrentText(str(values[1]))
+            inter_dist_combo.setMaximumWidth(110)
+            self.setCellWidget(row_index, 3, inter_dist_combo)
+
+            intra_sigma_edit = QLineEdit(str(values[2]))
+            intra_sigma_edit.setMaximumWidth(80)
+            self.setCellWidget(row_index, 4, intra_sigma_edit)
+
+            intra_dist_combo = QComboBox()
+            intra_dist_combo.addItems(["lognormal", "normal", "uniform", "constant"])
+            intra_dist_combo.setCurrentText(str(values[3]))
+            intra_dist_combo.setMaximumWidth(110)
+            self.setCellWidget(row_index, 5, intra_dist_combo)
+
+            dep_field_edit = QLineEdit(str(values[4]))
+            dep_field_edit.setMaximumWidth(140)
+            self.setCellWidget(row_index, 6, dep_field_edit)
+
+    @staticmethod
+    def _normalize_spec(spec: Optional[Iterable[Any]]) -> List[Any]:
+        defaults = [0.0, "lognormal", 0.0, "lognormal", ""]
+        if spec is None:
+            return defaults
+        values = list(defaults)
+        for idx, value in enumerate(list(spec)[:5]):
+            values[idx] = value
+        if not values[1]:
+            values[1] = "lognormal"
+        if not values[3]:
+            values[3] = "lognormal"
+        return values
+
+    def get_variability_values(self) -> Dict[str, Dict[str, List[Any]]]:
+        results: Dict[str, Dict[str, List[Any]]] = {}
+        for row_index, (param, api_name) in enumerate(self._row_mapping):
+            inter_sigma = self._to_float(self.cellWidget(row_index, 2))
+            inter_dist = self._combo_value(self.cellWidget(row_index, 3))
+            intra_sigma = self._to_float(self.cellWidget(row_index, 4))
+            intra_dist = self._combo_value(self.cellWidget(row_index, 5))
+            dep_field = self._line_value(self.cellWidget(row_index, 6))
+
+            spec = [inter_sigma, inter_dist or "lognormal", intra_sigma, intra_dist or "lognormal", dep_field or api_name]
+            results.setdefault(param, {})[api_name] = spec
+        return results
+
+    @staticmethod
+    def _to_float(widget: Optional[QLineEdit]) -> float:
+        if isinstance(widget, QLineEdit):
+            try:
+                return float(widget.text())
+            except (TypeError, ValueError):
+                return 0.0
+        return 0.0
+
+    @staticmethod
+    def _combo_value(widget: Optional[QComboBox]) -> str:
+        if isinstance(widget, QComboBox):
+            return widget.currentText()
+        return "lognormal"
+
+    @staticmethod
+    def _line_value(widget: Optional[QLineEdit]) -> str:
+        if isinstance(widget, QLineEdit):
+            return widget.text()
+        return ""
+
 class GIVariabilityTable(QTableWidget):
     """Specialized table for GI tract variability - matches GITractTable layout."""
 
@@ -1449,24 +2229,35 @@ class GIVariabilityTable(QTableWidget):
     def populate_from_variability_toml(self, data: Dict[str, Any], gi_type: str):
         """Populate table from GI variability TOML data."""
         for row, (param_key, param_label) in enumerate(self.param_configs):
-            if param_key in data and gi_type in data[param_key]:
-                compartment_variabilities = data[param_key][gi_type]
+            if param_key not in data:
+                continue
+            per_api = data[param_key]
+            compartment_variabilities = None
+            if isinstance(per_api, dict):
+                if gi_type in per_api:
+                    compartment_variabilities = per_api[gi_type]
+                elif per_api:
+                    # fallback to first available API entry
+                    first_key = next(iter(per_api))
+                    compartment_variabilities = per_api[first_key]
+            elif isinstance(per_api, list):
+                compartment_variabilities = per_api
 
-                for comp_idx, comp_variability in enumerate(compartment_variabilities[:9]):
-                    if isinstance(comp_variability, list) and len(comp_variability) >= 2:
-                        # Column indices for this compartment
-                        sigma_col = 1 + comp_idx * 2
-                        dist_col = sigma_col + 1
+            if not compartment_variabilities:
+                continue
 
-                        # Set sigma value
-                        sigma_item = QTableWidgetItem(str(comp_variability[0]))
-                        self.setItem(row, sigma_col, sigma_item)
+            for comp_idx, comp_variability in enumerate(compartment_variabilities[:9]):
+                if isinstance(comp_variability, list) and len(comp_variability) >= 2:
+                    sigma_col = 1 + comp_idx * 2
+                    dist_col = sigma_col + 1
 
-                        # Set distribution dropdown
-                        dist_combo = QComboBox()
-                        dist_combo.addItems(["lognormal", "normal", "uniform", "constant"])
-                        dist_combo.setCurrentText(str(comp_variability[1]))
-                        self.setCellWidget(row, dist_col, dist_combo)
+                    sigma_item = QTableWidgetItem(str(comp_variability[0]))
+                    self.setItem(row, sigma_col, sigma_item)
+
+                    dist_combo = QComboBox()
+                    dist_combo.addItems(["lognormal", "normal", "uniform", "constant"])
+                    dist_combo.setCurrentText(str(comp_variability[1]))
+                    self.setCellWidget(row, dist_col, dist_combo)
 
     def get_variability_values(self) -> Dict[str, Any]:
         """Get all variability values from table."""

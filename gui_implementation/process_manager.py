@@ -8,7 +8,8 @@ import json
 import sys
 import uuid
 from pathlib import Path
-from typing import Dict, Optional, Callable, Any, List, Union
+from collections import deque
+from typing import Deque, Dict, Optional, Callable, Any, List, Tuple, Union
 from datetime import datetime
 import structlog
 
@@ -65,6 +66,8 @@ class ProcessManager(QObject):
     process_error = Signal(str, str)  # run_id, error_message
     process_metric = Signal(str, str, float)  # run_id, metric_name, value
     process_log = Signal(str, str)  # run_id, log_line
+    process_queued = Signal(str, int)  # run_id, queue_position
+    queue_positions_updated = Signal()
 
     def __init__(self, workspace_manager: WorkspaceManager):
         super().__init__()
@@ -72,6 +75,8 @@ class ProcessManager(QObject):
         self.active_processes: Dict[str, ProcessInfo] = {}
         self.max_parallel_processes = 4
         self.completed_logs: Dict[str, List[str]] = {}
+        self.pending_requests: Deque[Tuple[RunRequest, Path]] = deque()
+        self.queued_requests: Dict[str, Tuple[RunRequest, Path]] = {}
 
         # Timer for periodic updates
         self.update_timer = QTimer()
@@ -159,9 +164,6 @@ class ProcessManager(QObject):
         return request
 
     def _start_from_request(self, request: RunRequest) -> str:
-        if len(self.active_processes) >= self.max_parallel_processes:
-            raise RuntimeError(f"Maximum {self.max_parallel_processes} processes already running")
-
         label_slug = request.label
 
         if request.run_id is None:
@@ -172,20 +174,46 @@ class ProcessManager(QObject):
 
         run_id = request.run_id
 
-        logger.info(
-            "Starting simulation process",
-            run_id=run_id,
-            config=request.config_path,
-            run_type=request.run_type.value,
-            label=request.display_label or request.label,
-        )
-
         run_dir = self.workspace_manager.create_run_directory(
             run_id,
             run_type=request.run_type.value,
             label=request.display_label or request.label,
             parent_run_id=request.parent_run_id,
             request_metadata=request.as_metadata(),
+        )
+
+        if len(self.active_processes) >= self.max_parallel_processes:
+            self.pending_requests.append((request, run_dir))
+            self.queued_requests[run_id] = (request, run_dir)
+            self.workspace_manager.update_run_status(
+                run_id,
+                "queued",
+                queue_position=len(self.pending_requests) - 1,
+            )
+            self.process_log.emit(run_id, "Queued (waiting for available worker)")
+            self.process_queued.emit(run_id, len(self.pending_requests) - 1)
+            self.queue_positions_updated.emit()
+            logger.info(
+                "Queued simulation process",
+                run_id=run_id,
+                config=request.config_path,
+                run_type=request.run_type.value,
+                label=request.display_label or request.label,
+            )
+            return run_id
+
+        self._launch_request(request, run_dir)
+        return run_id
+
+    def _launch_request(self, request: RunRequest, run_dir: Path) -> None:
+        run_id = request.run_id
+
+        logger.info(
+            "Starting simulation process",
+            run_id=run_id,
+            config=request.config_path,
+            run_type=request.run_type.value,
+            label=request.display_label or request.label,
         )
 
         process = QProcess()
@@ -269,7 +297,47 @@ class ProcessManager(QObject):
         self.process_started.emit(run_id)
         logger.info("Simulation process started", run_id=run_id, pid=process.processId())
 
-        return run_id
+        if run_id in self.queued_requests:
+            self.queued_requests.pop(run_id, None)
+            self._update_queue_metadata()
+
+    def _update_queue_metadata(self) -> None:
+        for idx, (queued_request, _) in enumerate(self.pending_requests):
+            try:
+                self.workspace_manager.update_run_status(
+                    queued_request.run_id,
+                    "queued",
+                    queue_position=idx,
+                )
+                self.process_queued.emit(queued_request.run_id, idx)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to update queue metadata",
+                    run_id=queued_request.run_id,
+                    error=str(exc),
+                )
+
+    def _maybe_start_next(self) -> None:
+        while self.pending_requests and len(self.active_processes) < self.max_parallel_processes:
+            request, run_dir = self.pending_requests.popleft()
+            try:
+                self._launch_request(request, run_dir)
+            except Exception as exc:
+                logger.error(
+                    "Failed to start queued process",
+                    run_id=request.run_id,
+                    error=str(exc),
+                )
+                try:
+                    self.workspace_manager.update_run_status(
+                        request.run_id,
+                        "failed",
+                        error=str(exc),
+                    )
+                except Exception:
+                    pass
+        if self.pending_requests:
+            self._update_queue_metadata()
 
     def _append_log(self, run_id: str, message: str):
         message = message.rstrip()
@@ -305,6 +373,19 @@ class ProcessManager(QObject):
             True if cancellation was initiated
         """
         if run_id not in self.active_processes:
+            if run_id in self.queued_requests:
+                # Remove from queue
+                self.pending_requests = deque(
+                    (req, rd)
+                    for req, rd in self.pending_requests
+                    if req.run_id != run_id
+                )
+                self.queued_requests.pop(run_id, None)
+                self.workspace_manager.update_run_status(run_id, "cancelled")
+                self.process_log.emit(run_id, "Cancelled while queued")
+                self._update_queue_metadata()
+                self._maybe_start_next()
+                return True
             logger.warning("Cannot cancel unknown process", run_id=run_id)
             return False
 
@@ -331,6 +412,12 @@ class ProcessManager(QObject):
     def get_process_info(self, run_id: str) -> Optional[ProcessInfo]:
         """Get information about a process."""
         return self.active_processes.get(run_id)
+
+    def is_run_active(self, run_id: str) -> bool:
+        return run_id in self.active_processes
+
+    def is_run_queued(self, run_id: str) -> bool:
+        return run_id in self.queued_requests
 
     def list_active_processes(self) -> List[ProcessInfo]:
         """List all active processes."""
@@ -482,6 +569,7 @@ class ProcessManager(QObject):
 
         # Remove from active processes
         del self.active_processes[run_id]
+        self._maybe_start_next()
 
     def update_processes(self):
         """Periodic update of process information."""
@@ -508,10 +596,18 @@ class ProcessManager(QObject):
                     logger.info("Cleaning up finished process", run_id=run_id)
                     del self.active_processes[run_id]
 
-    def set_max_parallel_processes(self, max_processes: int):
-        """Set maximum number of parallel processes."""
+    def set_max_parallel_processes(self, max_processes: int) -> None:
+        """Set maximum number of parallel worker processes."""
+
         if max_processes < 1:
             raise ValueError("Max processes must be at least 1")
 
+        if max_processes == self.max_parallel_processes:
+            return
+
         self.max_parallel_processes = max_processes
         logger.info("Max parallel processes set", max_processes=max_processes)
+
+        # Try to launch queued runs if additional capacity is now available.
+        self._maybe_start_next()
+        self._update_queue_metadata()

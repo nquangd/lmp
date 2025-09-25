@@ -1,0 +1,28 @@
+# Tabulated flow profile variability parameters
+# Structure: [inter_sigma, inter_dist, intra_sigma, intra_dist, dependent_field]
+# Flow profile points are scaled externally by the sampled PIFR ratio; only scalar parameters have explicit variability here.
+
+name = []
+description = []
+maneuver_type = []
+
+# Peak inspiratory flow rate (L/min) - GCV = 0.3 -> sigma = 0.2936
+pifr_Lpm = [0.2936, "lognormal", 0.2936, "lognormal", ""]
+
+# Inhaled volume (L) - No variability (volume is implied by tabulated flow)
+inhaled_volume_L = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# Breath hold time after inhalation (s) - No variability
+breath_hold_time_s = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# Exhalation flow rate (L/min) - No variability
+exhalation_flow_Lpm = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# Bolus volume (mL) - No variability
+bolus_volume_ml = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# Bolus delay (s) - No variability
+bolus_delay_s = [0.0, "lognormal", 0.0, "lognormal", ""]
+
+# ET deposition scaling factor - Same magnitudes as other inhalation profiles
+et_scale_factor = [0.2318, "lognormal", 0.1492, "lognormal", ""]

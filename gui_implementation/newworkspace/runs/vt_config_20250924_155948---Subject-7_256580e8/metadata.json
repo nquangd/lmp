@@ -1,0 +1,124 @@
+{
+  "run_id": "vt_config_20250924_155948---Subject-7_256580e8",
+  "run_type": "virtual_trial",
+  "label": "config_20250924_155948---Subject-7",
+  "display_label": "config_20250924_155948 \u00b7 Subject 7",
+  "parent_run_id": "vt_config_20250924_155948_3ab29e9b",
+  "created": "2025-09-24T16:03:00.581110",
+  "status": "completed",
+  "workspace": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace",
+  "manifest_index": 6,
+  "total_runs": 10,
+  "task_spec": {
+    "subject_index": 6,
+    "subject_name": "healthy_reference",
+    "api": "BD",
+    "products": [
+      "Default_IV_Template"
+    ],
+    "seed": 11240,
+    "apply_variability": true,
+    "variability_settings": null,
+    "study_type": "bioequivalence",
+    "study_design": "parallel",
+    "charcoal_block": false,
+    "suppress_et_absorption": false
+  },
+  "run_plan": {
+    "run_type": "virtual_trial",
+    "run_label": null,
+    "config_name": null,
+    "stages": [
+      "iv_pk"
+    ],
+    "virtual_trial": {
+      "n_subjects": 10,
+      "base_seed": 1234,
+      "apply_variability": true,
+      "additional_products": []
+    },
+    "workspace_bindings": {
+      "product": "default-iv-template"
+    }
+  },
+  "virtual_trial_task": {
+    "subject_index": 6,
+    "subject_name": "healthy_reference",
+    "api": "BD",
+    "products": [
+      "Default_IV_Template"
+    ],
+    "seed": 11240,
+    "apply_variability": true,
+    "variability_settings": null,
+    "study_type": "bioequivalence",
+    "study_design": "parallel",
+    "charcoal_block": false,
+    "suppress_et_absorption": false
+  },
+  "last_updated": "2025-09-24T16:03:05.997560",
+  "queue_position": 0,
+  "started_at": "2025-09-24T16:03:03.308045",
+  "parameter_overrides": null,
+  "config_path": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace/configs/config_20250924_155948.json",
+  "runtime_seconds": 2.689372,
+  "result_files": [
+    "Default_IV_Template__pk_curve.parquet",
+    "Default_IV_Template__pk_compartments.parquet",
+    "Default_IV_Template__regional_auc.parquet",
+    "Default_IV_Template__deposition_bins.parquet",
+    "Default_IV_Template__solver_stats.parquet",
+    "Default_IV_Template__subject_params.parquet"
+  ],
+  "subject_index": 6,
+  "subject_name": "healthy_reference",
+  "api_name": "BD",
+  "seed": 11240,
+  "apply_variability": true,
+  "products": {
+    "Default_IV_Template": {
+      "role": "reference",
+      "summary_metrics": {
+        "pk_cmax": 10997.326203208555,
+        "pk_tmax_h": 0.0,
+        "pk_auc_0_last": 12505513.807148041,
+        "pk_metric_cmax_ng_mL": 10997.326203208555,
+        "pk_metric_tmax_h": 0.0,
+        "pk_metric_auc_ng_h_mL": 3473.7538353189,
+        "pk_metric_dose_mg": 0.32904,
+        "pk_metric_dose_duration_h": 0.0
+      },
+      "stage_metrics": {
+        "pk": {
+          "cmax_conc_plasma": 10997.326203208555,
+          "tmax_h": 0.0,
+          "auc_0_last": 12505513.807148041
+        },
+        "overall": {
+          "pk_cmax": 10997.326203208555,
+          "pk_tmax_h": 0.0,
+          "pk_auc_0_last": 12505513.807148041,
+          "pk_metric_cmax_ng_mL": 10997.326203208555,
+          "pk_metric_tmax_h": 0.0,
+          "pk_metric_auc_ng_h_mL": 3473.7538353189,
+          "pk_metric_dose_mg": 0.32904,
+          "pk_metric_dose_duration_h": 0.0
+        }
+      },
+      "stage_order": [
+        "pk",
+        "overall"
+      ],
+      "result_files": [
+        "Default_IV_Template__pk_curve.parquet",
+        "Default_IV_Template__pk_compartments.parquet",
+        "Default_IV_Template__regional_auc.parquet",
+        "Default_IV_Template__deposition_bins.parquet",
+        "Default_IV_Template__solver_stats.parquet",
+        "Default_IV_Template__subject_params.parquet"
+      ]
+    }
+  },
+  "exit_code": 0,
+  "completed_at": "2025-09-24T16:03:05.997397"
+}

@@ -5,9 +5,10 @@ This file now contains only API, Product, InhalationManeuver, and other entities
 """
 
 from __future__ import annotations
-from typing import Optional, Dict, Any, List, Tuple, TYPE_CHECKING, Mapping
+from typing import Optional, Dict, Any, List, Tuple, TYPE_CHECKING, Mapping, Sequence
 from dataclasses import dataclass, fields
-from pydantic import BaseModel, Field, field_validator, computed_field, PrivateAttr
+import copy
+from pydantic import BaseModel, Field, field_validator, computed_field, PrivateAttr, model_validator
 import math
 import numpy as np
 
@@ -218,44 +219,130 @@ class API(BaseModel):
         return self
 
 
+_DEFAULT_ROUTE_STAGE_MAP = {
+    "iv": ["iv_pk"],
+    "po": ["gi_pk"],
+    "inhalation": ["cfd", "deposition", "pbbm", "pk"],
+}
+
+_DEFAULT_ROUTE_STAGE_MODEL = {
+    "iv": "iv_2c",
+    "po": "gi_2c",
+    "inhalation": "pk_3c",
+}
+
+
+class ProductAPIEntry(BaseModel):
+    """Configuration for a single API within a product."""
+
+    ref: Optional[str] = Field(None, description="Catalog reference for this API slot")
+    dose_pg: Optional[float] = Field(None, ge=0.0, description="Delivered dose in picograms")
+    dose_ug: Optional[float] = Field(None, ge=0.0, description="Delivered dose in micrograms")
+    dose_mg: Optional[float] = Field(None, ge=0.0, description="Delivered dose in milligrams")
+    usp_depo_fraction: Optional[float] = Field(None, description="USP deposition fraction (%)")
+    mmad: Optional[float] = Field(None, description="Mass median aerodynamic diameter (µm)")
+    gsd: Optional[float] = Field(None, description="Geometric standard deviation")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_input(cls, data):
+        if isinstance(data, ProductAPIEntry):
+            return data.model_dump()
+        return data
+
+    @model_validator(mode="after")
+    def _ensure_units(self):
+        if self.dose_mg is not None:
+            if self.dose_ug is None:
+                self.dose_ug = self.dose_mg * 1_000.0
+            if self.dose_pg is None:
+                self.dose_pg = self.dose_mg * 1_000_000_000.0
+        if self.dose_pg is None and self.dose_ug is not None:
+            self.dose_pg = self.dose_ug * 1_000_000.0
+        elif self.dose_pg is not None and self.dose_ug is None:
+            self.dose_ug = self.dose_pg / 1_000_000.0
+        if self.dose_mg is None:
+            if self.dose_ug is not None:
+                self.dose_mg = self.dose_ug / 1_000.0
+            elif self.dose_pg is not None:
+                self.dose_mg = self.dose_pg / 1_000_000_000.0
+        return self
+
+    def numeric_payload(self) -> Dict[str, float]:
+        data: Dict[str, float] = {}
+        if self.dose_pg is not None:
+            data["dose_pg"] = self.dose_pg
+        if self.dose_ug is not None:
+            data["dose_ug"] = self.dose_ug
+        if self.dose_mg is not None:
+            data["dose_mg"] = self.dose_mg
+        if self.usp_depo_fraction is not None:
+            data["usp_depo_fraction"] = self.usp_depo_fraction
+        if self.mmad is not None:
+            data["mmad"] = self.mmad
+        if self.gsd is not None:
+            data["gsd"] = self.gsd
+        return data
+
+    def get_dose_mg(self) -> Optional[float]:
+        return self.dose_mg
+
+
 class Product(BaseModel):
     """Drug product with API-specific parameters loaded from builtin catalog."""
-    
+
     # Basic identification
     name: str = Field(..., description="Product identifier")
     description: Optional[str] = Field(None, description="Product description")
-    
+
+    # Administration metadata
+    route: Optional[str] = Field(None, description="Primary administration route (e.g. 'iv', 'po', 'inhalation')")
+
     # Device properties (from builtin data)
     device: Optional[str] = Field(None, description="Device type (DFP, etc.)")
     propellant: Optional[str] = Field(None, description="Propellant type (PT210, PT010, etc.)")
-    
+
     # API-specific parameters (from builtin data)
-    apis: Optional[Dict[str, Dict[str, float]]] = Field(None, description="API-specific parameters")
+    apis: Dict[str, ProductAPIEntry] = Field(default_factory=dict, description="API-specific parameters keyed by slot name")
 
     @field_validator("apis", mode="before")
     @classmethod
-    def _normalize_apis(cls, v):
-        """Normalize apis from [[apis]] list-of-tables to dict keyed by API name.
-        Accept both list (with name field) and dict forms. Return empty dict if None.
-        """
-        if v is None:
+    def _normalize_apis(cls, value):
+        if not value:
             return {}
-        # If already a dict, assume correct shape {"BD": {...}, ...}
-        if isinstance(v, dict):
-            return v
-        # Convert list of tables to dict using the 'name' field as key
-        if isinstance(v, list):
-            normalized: Dict[str, Dict[str, float]] = {}
-            for item in v:
+
+        normalized: Dict[str, Any] = {}
+
+        if isinstance(value, dict):
+            for key, payload in value.items():
+                slot_key = str(key)
+                if isinstance(payload, ProductAPIEntry):
+                    normalized[slot_key] = payload
+                elif isinstance(payload, dict):
+                    normalized[slot_key] = ProductAPIEntry(**payload)
+                else:
+                    normalized[slot_key] = ProductAPIEntry()
+            return normalized
+
+        if isinstance(value, list):
+            for item in value:
                 if not isinstance(item, dict):
                     continue
-                name = item.get("name") or item.get("api") or item.get("id")
-                if not name:
+                slot_name = item.get("slot") or item.get("name") or item.get("id")
+                if not slot_name:
                     continue
-                entry = {k: val for k, val in item.items() if k != "name"}
-                normalized[str(name)] = entry  # coerce key to string
+                payload = {k: v for k, v in item.items() if k not in {"slot", "name"}}
+                normalized[str(slot_name)] = ProductAPIEntry(**payload)
             return normalized
-        return v
+
+        return value
+
+    @field_validator("route")
+    @classmethod
+    def _normalize_route(cls, value: Optional[str]) -> Optional[str]:
+        if not value:
+            return None
+        return str(value).strip().lower() or None
 
     # Internal state
     is_loaded: bool = Field(False, exclude=True, description="Whether parameters are loaded from builtin")
@@ -285,16 +372,101 @@ class Product(BaseModel):
     
     def get_api_parameters(self, api_name: str) -> Dict[str, float]:
         """Get API-specific parameters for this product.
-        
+
         Args:
-            api_name: API name ('BD', 'GP', 'FF')
-            
+            api_name: API name or catalog reference.
+
         Returns:
-            Dictionary with dose_pg, mmad, gsd, usp_depo_fraction
+            Dictionary with dose_pg, mmad, gsd, usp_depo_fraction and optionally ref.
         """
-        if not self.apis or api_name not in self.apis:
+        entry = self._resolve_api_entry(api_name)
+        if entry is None:
             return {}
-        return self.apis[api_name]
+
+        data = entry.numeric_payload()
+        if entry.ref:
+            data["ref"] = entry.ref
+        return data
+
+    def _resolve_api_entry(self, api_name: Optional[str]) -> Optional[ProductAPIEntry]:
+        if not api_name or not self.apis:
+            return None
+
+        entry = self.apis.get(api_name)
+        if entry is not None:
+            return entry
+
+        for candidate in self.apis.values():
+            if candidate.ref and candidate.ref == api_name:
+                return candidate
+
+        return None
+
+    def get_api_entry(self, api_name: str) -> Optional[ProductAPIEntry]:
+        """Return the configured API entry, resolving by name or reference."""
+
+        return self._resolve_api_entry(api_name)
+
+    def get_route_stage_list(self, route: Optional[str] = None) -> List[str]:
+        """Return the recommended stage list for a given administration route."""
+
+        route_key = (route or self.route or "").lower()
+        return list(_DEFAULT_ROUTE_STAGE_MAP.get(route_key, []))
+
+    def build_stage_overrides(
+        self,
+        route: Optional[str] = None,
+        api_name: Optional[str] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Construct default stage overrides for a route/API combination."""
+
+        route_key = (route or self.route or "").lower()
+        stage_list = _DEFAULT_ROUTE_STAGE_MAP.get(route_key)
+        if not stage_list:
+            return {}
+
+        if route_key == "inhalation":
+            return {}
+
+        stage_name = stage_list[0]
+        stage_model = _DEFAULT_ROUTE_STAGE_MODEL.get(route_key)
+        overrides: Dict[str, Dict[str, Any]] = {stage_name: {}}
+        if stage_model:
+            overrides[stage_name]["model"] = stage_model
+        overrides[stage_name]["params"] = {}
+
+        params = overrides[stage_name]["params"]
+        api_entry = self._resolve_api_entry(api_name)
+        dose_mg = api_entry.get_dose_mg() if api_entry else None
+
+        if route_key == "iv":
+            if dose_mg is not None:
+                params.setdefault("iv_dose_mg", dose_mg)
+            params.setdefault("iv_dose_duration_h", 0.0)
+        elif route_key == "po":
+            if dose_mg is not None:
+                params.setdefault("oral_dose_mg", dose_mg)
+            params.setdefault("formulation", "immediate_release")
+
+        return overrides
+
+    @staticmethod
+    def infer_route_from_stages(stages: Sequence[str]) -> Optional[str]:
+        """Infer administration route based on requested pipeline stages."""
+
+        if not stages:
+            return None
+
+        stage_set = {str(stage).lower() for stage in stages}
+        if "iv_pk" in stage_set:
+            return "iv"
+        if "gi_pk" in stage_set:
+            return "po"
+        if "pbbm" in stage_set or "deposition" in stage_set:
+            return "inhalation"
+        if "pk" in stage_set:
+            return "inhalation"
+        return None
     
     def get_dose_pg(self, api_name: str) -> float:
         """Get dose in picograms for specific API.
@@ -318,20 +490,22 @@ class Product(BaseModel):
         Returns:
             Product instance with computed attributes (final_dose_pg, final_api_name, etc.)
         """
-        api_params = self.get_api_parameters(api_name)
-        if not api_params:
+        api_entry = self._resolve_api_entry(api_name)
+
+        if api_entry is None:
             raise ValueError(f"API '{api_name}' not found in product '{self.name}'")
-        
-        # Use override dose if provided, otherwise use builtin dose
-        final_dose_pg = dose_override_pg if dose_override_pg is not None else api_params.get('dose_pg', 0.0)
-        
+
+        params = api_entry.numeric_payload()
+
+        final_dose_pg = dose_override_pg if dose_override_pg is not None else params.get('dose_pg', 0.0)
+
         # Store computed values as attributes on the product instance
         self._final_api_name = api_name
         self._final_dose_pg = final_dose_pg
-        self._final_mmad = api_params.get('mmad', 3.5)
-        self._final_gsd = api_params.get('gsd', 1.6)
-        self._final_usp_depo_fraction = api_params.get('usp_depo_fraction', 40.0)
-        
+        self._final_mmad = params.get('mmad', 3.5)
+        self._final_gsd = params.get('gsd', 1.6)
+        self._final_usp_depo_fraction = params.get('usp_depo_fraction', 40.0)
+
         return self
 
 
@@ -1141,6 +1315,10 @@ class Subject(BaseModel):
     gi: Optional[GI] = Field(None, description="GI tract physiology")
     pk: Optional[PK] = Field(None, description="Pharmacokinetic parameters")
     inhalation_maneuver: Optional[InhalationManeuver] = Field(None, description="Inhalation maneuver parameters")
+    pk_variability: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Override pharmacokinetic variability specifications keyed by parameter",
+    )
 
     # Results attached to this subject (populated after running models)
     results_deposition: Optional[dict] = Field(None, description="Deposition results wrapper", exclude=True)
@@ -1359,11 +1537,13 @@ class Subject(BaseModel):
             if self.gi and settings.gi
             else None
         )
-        pk_var = (
-            PK.get_variability(True, self.pk.name if self.pk else "default")
-            if self.pk and settings.pk
-            else None
-        )
+        if self.pk and settings.pk:
+            if self.pk_variability:
+                pk_var = copy.deepcopy(self.pk_variability)
+            else:
+                pk_var = PK.get_variability(True, self.pk.name if self.pk else "default")
+        else:
+            pk_var = None
         inhalation_var = (
             InhalationManeuver.get_variability(True, self.inhalation_maneuver.name if self.inhalation_maneuver else "pMDI_variable_trapezoid")
             if self.inhalation_maneuver and settings.inhalation

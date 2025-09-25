@@ -19,7 +19,7 @@ The GUI follows the plan's modular design with PySide6 as the Qt framework:
 2. **Catalog & Libraries** - Browse available subjects, APIs, products, and maneuvers
 3. **Study Designer** - Create simulation configurations with form-based UI
 4. **Run Queue** - Start simulations and monitor progress
-5. **Results Viewer** - View and analyze simulation results (placeholder)
+5. **Results Viewer** - View and analyze simulation results with exports and plots
 6. **Logs & Diagnostics** - Live log viewing and debugging (placeholder)
 
 ## Features Implemented
@@ -38,6 +38,25 @@ The GUI follows the plan's modular design with PySide6 as the Qt framework:
 - Form-based study designer
 - Catalog integration (placeholder)
 - Parameter sweep support
+
+✅ **Manual Overrides**
+- Manual deposition editors expose a parameter tree picker for override keys
+- Stage controls enable/disable manual widgets based on administration visibility
+
+✅ **Results Viewer**
+- Dataset filtering with PBPK selectors
+- Copy-to-clipboard and CSV export for the currently visible table
+
+### Sweep Expressions
+
+The sweep grid accepts either explicit value lists or helper expressions. Examples:
+
+- `range(0, 10, 2)` – 0, 2, 4, 6, 8
+- `linspace(0, 1, 5)` – five evenly spaced samples between 0 and 1
+- `normal(0, 1, 50)` – request 50 samples from a normal distribution (engine support required)
+- `uniform(5, 25, 10)` – ten draws from a uniform distribution
+
+Use a single expression or explicit values per parameter row; leave the remaining columns blank when providing an expression.
 
 ✅ **Run Management**
 - Queue-based execution
@@ -113,18 +132,18 @@ Worker processes communicate via JSONL events:
 ## Limitations & TODOs
 
 ### Current Limitations
-- Results viewer not fully implemented (shows placeholder)
+- Results viewer relies on Matplotlib fallback; interactive overlays and comparisons are pending
 - Catalog integration uses placeholder data
-- No actual plotting (pyqtgraph integration pending)
+- No pyqtgraph integration yet for high-frequency plots
 - No SLURM integration yet
 - Limited error handling in some areas
 
 ### Next Steps
 1. Integrate real catalog data via `app_api.list_catalog_entries()`
-2. Implement results viewing with pyqtgraph plots
-3. Add parameter sweep execution
+2. Replace Matplotlib fallback with pyqtgraph for interactive plotting and overlays
+3. Add comparative run analytics (overlays, delta metrics)
 4. Implement live log tailing
-5. Add configuration validation
+5. Improve inline validation and error messaging
 6. Package as standalone executable
 
 ## Example Usage

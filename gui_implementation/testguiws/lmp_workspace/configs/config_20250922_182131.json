@@ -1,0 +1,113 @@
+{
+  "metadata": {
+    "created": "2025-09-22T18:21:31.548409",
+    "workspace": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/testguiws/lmp_workspace",
+    "config_name": "config_20250922_182131.json",
+    "run_plan": {
+      "run_type": "single",
+      "run_label": null,
+      "config_name": null
+    }
+  },
+  "config": {
+    "run": {
+      "stages": [
+        "deposition",
+        "pbbm",
+        "pk"
+      ],
+      "workflow_name": null,
+      "seed": 123,
+      "threads": 1,
+      "enable_numba": false,
+      "artifact_dir": "results",
+      "n_replicates": 1
+    },
+    "study": {
+      "study_type": "bioequivalence",
+      "design": "parallel",
+      "n_subjects": 6,
+      "population": null,
+      "charcoal_block": false
+    },
+    "deposition": {
+      "model": "clean_lung",
+      "particle_grid": "medium",
+      "params": {}
+    },
+    "pbbm": {
+      "model": "numba",
+      "epi_layers": [
+        2,
+        2,
+        1,
+        1
+      ],
+      "solver": {
+        "method": "BDF",
+        "rtol": 1e-06,
+        "atol": 1e-09,
+        "max_step": 1.0
+      },
+      "params": {},
+      "charcoal_block": false,
+      "suppress_et_absorption": false
+    },
+    "pk": {
+      "model": "pk_3c",
+      "params": {}
+    },
+    "analysis": {
+      "bioequivalence": true,
+      "custom_metrics": []
+    },
+    "subject": {
+      "ref": "healthy_reference",
+      "overrides": {}
+    },
+    "api": {
+      "ref": "BD",
+      "overrides": {}
+    },
+    "product": {
+      "ref": "reference_product",
+      "overrides": {
+        "apis": [
+          {
+            "name": "BD",
+            "ref": "BD_d",
+            "dose_pg": 329040000.0,
+            "dose_ug": 329.04,
+            "usp_depo_fraction": 41.26,
+            "mmad": 3.53,
+            "gsd": 1.61
+          },
+          {
+            "name": "GP",
+            "ref": "BD_f",
+            "dose_pg": 300000000.0,
+            "dose_ug": 300.0,
+            "usp_depo_fraction": 38.18,
+            "mmad": 3.4,
+            "gsd": 1.62
+          },
+          {
+            "name": "FF",
+            "ref": "BD_e",
+            "dose_pg": 160000000.0,
+            "dose_ug": 160.0,
+            "usp_depo_fraction": 38.28,
+            "mmad": 3.4,
+            "gsd": 1.66
+          }
+        ]
+      }
+    },
+    "maneuver": {
+      "ref": "pMDI_variable_trapezoid",
+      "overrides": {}
+    },
+    "variability": null,
+    "population_variability": null
+  }
+}

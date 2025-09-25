@@ -1,0 +1,67 @@
+{
+  "run_id": "vt_iv2---Subject-8_b4d064eb",
+  "run_type": "virtual_trial",
+  "label": "iv2---Subject-8",
+  "display_label": "iv2 \u00b7 Subject 8",
+  "parent_run_id": "vt_iv2_8af6427a",
+  "created": "2025-09-23T23:02:34.916933",
+  "status": "failed",
+  "workspace": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace",
+  "manifest_index": 7,
+  "total_runs": 10,
+  "task_spec": {
+    "subject_index": 7,
+    "subject_name": "healthy_reference",
+    "api": "BD",
+    "products": [
+      "Default_IV_Template"
+    ],
+    "seed": 11241,
+    "apply_variability": true,
+    "variability_settings": null,
+    "study_type": "bioequivalence",
+    "study_design": "parallel",
+    "charcoal_block": false,
+    "suppress_et_absorption": false
+  },
+  "run_plan": {
+    "run_type": "virtual_trial",
+    "run_label": "iv2",
+    "config_name": "iv-vir",
+    "stages": [
+      "iv_pk"
+    ],
+    "virtual_trial": {
+      "n_subjects": 10,
+      "base_seed": 1234,
+      "apply_variability": true,
+      "additional_products": []
+    },
+    "workspace_bindings": {
+      "api": "bd",
+      "product": "default-iv-template"
+    }
+  },
+  "virtual_trial_task": {
+    "subject_index": 7,
+    "subject_name": "healthy_reference",
+    "api": "BD",
+    "products": [
+      "Default_IV_Template"
+    ],
+    "seed": 11241,
+    "apply_variability": true,
+    "variability_settings": null,
+    "study_type": "bioequivalence",
+    "study_design": "parallel",
+    "charcoal_block": false,
+    "suppress_et_absorption": false
+  },
+  "last_updated": "2025-09-23T23:02:39.095814",
+  "queue_position": 0,
+  "started_at": "2025-09-23T23:02:36.997889",
+  "parameter_overrides": null,
+  "runtime_seconds": 2.09789,
+  "exit_code": 1,
+  "completed_at": "2025-09-23T23:02:39.095755"
+}

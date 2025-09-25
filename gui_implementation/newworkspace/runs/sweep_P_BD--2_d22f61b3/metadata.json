@@ -1,0 +1,125 @@
+{
+  "run_id": "sweep_P_BD--2_d22f61b3",
+  "run_type": "sweep",
+  "label": "P_BD--2",
+  "display_label": "P_BD #2",
+  "parent_run_id": "sweep_P_BD_54c13c55",
+  "created": "2025-09-24T12:05:27.174209",
+  "status": "completed",
+  "workspace": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace",
+  "manifest_index": 1,
+  "total_runs": 3,
+  "parameter_overrides": {
+    "product.overrides.apis.BD.dose_ug": 320
+  },
+  "run_plan": {
+    "run_type": "sweep",
+    "run_label": "P_BD",
+    "config_name": "S_IV_p",
+    "stages": [
+      "iv_pk"
+    ],
+    "sweep_parameters": {
+      "product.overrides.apis.BD.dose_ug": [
+        160,
+        320,
+        480
+      ]
+    },
+    "workspace_bindings": {
+      "product": "default-iv-template"
+    }
+  },
+  "sweep_overrides": {
+    "product.overrides.apis.BD.dose_ug": 320
+  },
+  "manifest_row": 1,
+  "manifest_run_id": "run_002",
+  "last_updated": "2025-09-24T12:05:30.673080",
+  "started_at": "2025-09-24T12:05:27.184043",
+  "config_path": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace/configs/S_IV_p.json",
+  "runtime_seconds": 3.488827,
+  "result_files": [
+    "pk_curve.parquet",
+    "pk_compartments.parquet",
+    "regional_auc.parquet",
+    "deposition_bins.parquet",
+    "solver_stats.parquet",
+    "subject_params.parquet"
+  ],
+  "metadata": {
+    "status": "completed",
+    "entities": {
+      "subject": "healthy_reference: 35.6y, 97.8kg, M, BMI=28.9",
+      "api": "BD: MW=430.5\u03bcg/\u03bcmol",
+      "product": "Default IV Dosing: None",
+      "maneuver": "pMDI_variable_trapezoid: 30.0L/min, 2.0L"
+    },
+    "stage_times": {
+      "iv_pk": 0.5497576670000002
+    },
+    "stage_results": {
+      "iv_pk": {
+        "model": "iv_2c",
+        "metadata": {
+          "model_type": "2c",
+          "pk_metrics": {
+            "cmax_ng_mL": 10695.1871657754,
+            "tmax_h": 0.0,
+            "auc_ng_h_mL": 3378.316395283321,
+            "dose_mg": 0.32,
+            "dose_duration_h": 0.0,
+            "dosing_type": "iv_bolus"
+          },
+          "units": "ng/mL",
+          "source": "iv_pk_stage"
+        }
+      }
+    }
+  },
+  "stage_metrics": {
+    "pk": {
+      "cmax_conc_plasma": 10695.1871657754,
+      "tmax_h": 0.0,
+      "auc_0_last": 12161939.023019958
+    },
+    "iv_pk": {
+      "cmax_conc_plasma": 10695.1871657754,
+      "tmax_h": 0.0,
+      "auc_0_last": 12161939.023019958,
+      "metadata_pk_metrics_cmax_ng_mL": 10695.1871657754,
+      "metadata_pk_metrics_tmax_h": 0.0,
+      "metadata_pk_metrics_auc_ng_h_mL": 3378.316395283321,
+      "metadata_pk_metrics_dose_mg": 0.32,
+      "metadata_pk_metrics_dose_duration_h": 0.0,
+      "runtime_seconds": 0.5497576670000002
+    },
+    "overall": {
+      "pk_cmax": 10695.1871657754,
+      "pk_tmax_h": 0.0,
+      "pk_auc_0_last": 12161939.023019958,
+      "pk_metric_cmax_ng_mL": 10695.1871657754,
+      "pk_metric_tmax_h": 0.0,
+      "pk_metric_auc_ng_h_mL": 3378.316395283321,
+      "pk_metric_dose_mg": 0.32,
+      "pk_metric_dose_duration_h": 0.0
+    }
+  },
+  "summary_metrics": {
+    "pk_cmax": 10695.1871657754,
+    "pk_tmax_h": 0.0,
+    "pk_auc_0_last": 12161939.023019958,
+    "pk_metric_cmax_ng_mL": 10695.1871657754,
+    "pk_metric_tmax_h": 0.0,
+    "pk_metric_auc_ng_h_mL": 3378.316395283321,
+    "pk_metric_dose_mg": 0.32,
+    "pk_metric_dose_duration_h": 0.0
+  },
+  "stage_order": [
+    "iv_pk",
+    "pk",
+    "overall"
+  ],
+  "exit_code": 0,
+  "completed_at": "2025-09-24T12:05:30.672853"
+}

@@ -1,0 +1,17 @@
+{
+  "name": "ivtet",
+  "ref": "Default_IV_Template",
+  "overrides": {
+    "apis": {
+      "BD": {
+        "ref": "BD",
+        "dose_ug": 329.04,
+        "dose_pg": 329040000.0
+      }
+    }
+  },
+  "id": "ivtet",
+  "category": "product",
+  "updated": "2025-09-23T22:34:48.733103",
+  "created": "2025-09-23T22:34:48.733103"
+}

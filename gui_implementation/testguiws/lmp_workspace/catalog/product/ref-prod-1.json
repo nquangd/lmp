@@ -1,0 +1,20 @@
+{
+  "name": "ref_prod_1",
+  "ref": "reference_product",
+  "overrides": {
+    "apis": {
+      "BD": {
+        "ref": "BD_d",
+        "dose_ug": 329.04,
+        "dose_pg": 329040000.0,
+        "usp_depo_fraction": 41.26,
+        "mmad": 3.53,
+        "gsd": 1.61
+      }
+    }
+  },
+  "id": "ref-prod-1",
+  "category": "product",
+  "updated": "2025-09-22T20:12:40.750496",
+  "created": "2025-09-22T20:12:40.750496"
+}

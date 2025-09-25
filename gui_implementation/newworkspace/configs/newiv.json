@@ -1,0 +1,107 @@
+{
+  "metadata": {
+    "created": "2025-09-23T22:35:34.684376",
+    "workspace": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace",
+    "config_name": "newiv.json",
+    "run_plan": {
+      "run_type": "single",
+      "run_label": "newiv",
+      "config_name": "newiv",
+      "stages": [
+        "iv_pk"
+      ],
+      "workspace_bindings": {
+        "api": "bd",
+        "product": "ivtet"
+      }
+    }
+  },
+  "config": {
+    "run": {
+      "stages": [
+        "iv_pk"
+      ],
+      "workflow_name": null,
+      "seed": 123,
+      "threads": 1,
+      "enable_numba": false,
+      "artifact_dir": "results",
+      "n_replicates": 1,
+      "stage_overrides": {
+        "iv_pk": {
+          "model": "iv_3c",
+          "params": {
+            "iv_dose_mg": 0.32904,
+            "iv_dose_duration_h": 0.0,
+            "duration_h": 24.0,
+            "n_time_points": 1441
+          }
+        }
+      }
+    },
+    "study": {
+      "study_type": "bioequivalence",
+      "design": "parallel",
+      "n_subjects": 6,
+      "population": null,
+      "charcoal_block": false
+    },
+    "deposition": {
+      "model": "null",
+      "particle_grid": "medium",
+      "params": {}
+    },
+    "pbbm": {
+      "model": "numba",
+      "epi_layers": [
+        2,
+        2,
+        1,
+        1
+      ],
+      "solver": {
+        "method": "BDF",
+        "rtol": 1e-06,
+        "atol": 1e-09,
+        "max_step": 1.0
+      },
+      "params": {},
+      "charcoal_block": false,
+      "suppress_et_absorption": false
+    },
+    "pk": {
+      "model": "null",
+      "params": {}
+    },
+    "analysis": {
+      "bioequivalence": true,
+      "custom_metrics": []
+    },
+    "subject": {
+      "ref": "healthy_reference",
+      "overrides": {}
+    },
+    "api": {
+      "ref": "BD",
+      "overrides": {}
+    },
+    "product": {
+      "ref": "Default_IV_Template",
+      "overrides": {
+        "apis": {
+          "BD": {
+            "dose_pg": 329040000.0,
+            "dose_ug": 329.04,
+            "ref": "BD"
+          }
+        }
+      }
+    },
+    "maneuver": {
+      "ref": "pMDI_variable_trapezoid",
+      "overrides": {}
+    },
+    "variability": null,
+    "population_variability": null
+  }
+}

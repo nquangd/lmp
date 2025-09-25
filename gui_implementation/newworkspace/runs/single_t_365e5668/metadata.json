@@ -1,0 +1,29 @@
+{
+  "run_id": "single_t_365e5668",
+  "run_type": "single",
+  "label": "t",
+  "display_label": "t",
+  "parent_run_id": null,
+  "created": "2025-09-23T21:39:06.863150",
+  "status": "failed",
+  "workspace": "/Users/duynguyen/Library/Mobile Documents/com~apple~CloudDocs/LMP/lmp/gui_implementation/newworkspace",
+  "run_plan": {
+    "run_type": "single",
+    "run_label": "t",
+    "config_name": "pot",
+    "stages": [
+      "gi_pk",
+      "pk"
+    ],
+    "workspace_bindings": {
+      "api": "bd",
+      "product": "default-oral-template"
+    }
+  },
+  "last_updated": "2025-09-23T21:39:08.341523",
+  "started_at": "2025-09-23T21:39:06.878434",
+  "parameter_overrides": null,
+  "runtime_seconds": 1.462973,
+  "exit_code": 1,
+  "completed_at": "2025-09-23T21:39:08.341363"
+}

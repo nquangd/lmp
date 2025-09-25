@@ -22,14 +22,14 @@ def test_pe_pk_iv_runs_pk_stage_only():
     # Use workflow override to avoid default full pipeline (redundant but explicit)
     result = run_single_simulation(cfg, workflow=get_workflow("pe_pk_iv"))
 
-    # Assertions: only PK should be present
-    assert result.pk is not None, "PK stage should produce output"
+    # Assertions: only IV PK should be present
+    assert result.pk is not None, "IV PK stage should produce output"
     assert result.deposition is None, "Deposition stage must not run in pe_pk_iv"
     assert result.pbbk is None, "PBBM stage must not run in pe_pk_iv"
 
-    # Stage results should only include 'pk'
+    # Stage results should only include 'iv_pk'
     stage_results = result.metadata.get("stage_results", {})
-    assert set(stage_results.keys()) == {"pk"}
+    assert set(stage_results.keys()) == {"iv_pk"}
 
 
 
@@ -56,8 +56,8 @@ def test_parameter_fitter_on_pk_only_workflow():
 
     # Define a small parameter set to fit
     params = [
-        ParameterDefinition(name="volume_central_L", path="pk.params.volume_central_L", bounds=(10.0, 60.0)),
-        ParameterDefinition(name="clearance_L_h", path="pk.params.clearance_L_h", bounds=(10.0, 200.0)),
+        ParameterDefinition(name="volume_central_L", path="iv_pk.params.volume_central_L", bounds=(10.0, 60.0)),
+        ParameterDefinition(name="clearance_L_h", path="iv_pk.params.clearance_L_h", bounds=(10.0, 200.0)),
     ]
 
     fitter = ParameterFitter(

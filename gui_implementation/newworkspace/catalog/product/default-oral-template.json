@@ -1,0 +1,17 @@
+{
+  "name": "Default_Oral_Template",
+  "ref": "Default_Oral_Template",
+  "overrides": {
+    "apis": {
+      "BD": {
+        "ref": "BD",
+        "dose_ug": 329.04,
+        "dose_pg": 329040000.0
+      }
+    }
+  },
+  "id": "default-oral-template",
+  "category": "product",
+  "updated": "2025-09-23T23:17:24.991258",
+  "created": "2025-09-23T21:33:29.405921"
+}
